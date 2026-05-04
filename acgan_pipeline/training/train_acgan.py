@@ -207,5 +207,7 @@ def _weights_init(module: nn.Module) -> None:
         if module.bias is not None:
             nn.init.zeros_(module.bias)
     elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        nn.init.normal_(module.weight, mean=1.0, std=0.02)
-        nn.init.zeros_(module.bias)
+        if module.weight is not None:
+            nn.init.normal_(module.weight, mean=1.0, std=0.02)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
