@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,8 +68,11 @@ def train_acgan(
 
     history: list[dict[str, float]] = []
     fixed_labels = torch.arange(num_classes, device=device)
+    best_cls_acc = -1.0
+    started_at = time.perf_counter()
 
     for epoch in range(1, config.num_epochs + 1):
+        epoch_started_at = time.perf_counter()
         g_meter = AverageMeter()
         d_meter = AverageMeter()
         acc_meter = AverageMeter()
@@ -119,8 +124,10 @@ def train_acgan(
             "generator_loss": g_meter.average,
             "discriminator_loss": d_meter.average,
             "classification_accuracy": acc_meter.average,
+            "seconds": time.perf_counter() - epoch_started_at,
         }
         history.append(epoch_log)
+        _save_history(history, output_dir / "training_history.json")
         print(
             f"Epoch {epoch:03d}/{config.num_epochs} | "
             f"G: {g_meter.average:.4f} | D: {d_meter.average:.4f} | "
@@ -134,6 +141,11 @@ def train_acgan(
         if epoch % config.checkpoint_every == 0 or epoch == config.num_epochs:
             save_checkpoint(generator, discriminator, optimizer_g, optimizer_d, epoch, checkpoint_dir / f"epoch_{epoch:04d}.pt")
 
+        if acc_meter.average > best_cls_acc:
+            best_cls_acc = acc_meter.average
+            save_checkpoint(generator, discriminator, optimizer_g, optimizer_d, epoch, checkpoint_dir / "best_discriminator_cls.pt")
+
+    _save_history(history, output_dir / "training_history.json", total_seconds=time.perf_counter() - started_at)
     return generator, discriminator, history
 
 
@@ -186,6 +198,32 @@ def save_checkpoint(
         },
         path,
     )
+
+
+def load_generator_from_checkpoint(
+    checkpoint_path: str | Path,
+    *,
+    num_classes: int,
+    noise_dim: int = 100,
+    image_shape: tuple[int, int] = (128, 128),
+    device: str | torch.device | None = None,
+) -> Generator:
+    """Load only the generator from a saved AC-GAN checkpoint."""
+
+    device = torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    generator = Generator(noise_dim, num_classes, image_shape).to(device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    generator.load_state_dict(checkpoint["generator"])
+    generator.eval()
+    return generator
+
+
+def _save_history(history: list[dict[str, float]], path: Path, total_seconds: float | None = None) -> None:
+    payload = {"epochs": history}
+    if total_seconds is not None:
+        payload["total_seconds"] = total_seconds
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
 
 
 @torch.no_grad()

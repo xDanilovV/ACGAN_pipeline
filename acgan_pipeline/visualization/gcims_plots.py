@@ -87,9 +87,53 @@ def export_preprocessing_comparison(
     return path
 
 
-def _plot_on_axis(spectrum, ax, title: str) -> None:
+def export_real_vs_generated_comparison(
+    real: np.ndarray,
+    generated: np.ndarray,
+    path: str | Path,
+    *,
+    class_name: str,
+) -> Path:
+    """Save one real spectrum next to one generated spectrum for a class."""
+
+    ims = _import_gcims()
+    import matplotlib.pyplot as plt
+
+    real = np.asarray(real, dtype=np.float32)
+    generated = np.asarray(generated, dtype=np.float32)
+    vmin = float(min(np.min(real), np.min(generated)))
+    vmax = float(max(np.max(real), np.max(generated)))
+    real_spectrum = ims.Spectrum(
+        name=f"Real {class_name}",
+        values=real,
+        ret_time=np.arange(real.shape[0]),
+        drift_time=np.arange(real.shape[1]),
+        time=datetime.now(),
+        meta_attr={},
+    )
+    generated_spectrum = ims.Spectrum(
+        name=f"Generated {class_name}",
+        values=generated,
+        ret_time=np.arange(generated.shape[0]),
+        drift_time=np.arange(generated.shape[1]),
+        time=datetime.now(),
+        meta_attr={},
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
+    _plot_on_axis(real_spectrum, axes[0], "Real", vmin=vmin, vmax=vmax)
+    _plot_on_axis(generated_spectrum, axes[1], "Generated", vmin=vmin, vmax=vmax)
+    fig.suptitle(f"Real vs generated spectrum: {class_name}")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    _close_figure(fig)
+    return path
+
+
+def _plot_on_axis(spectrum, ax, title: str, *, vmin: float | None = None, vmax: float | None = None) -> None:
     values = spectrum.values
-    image = ax.imshow(values, aspect="auto", origin="lower")
+    image = ax.imshow(values, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)
     ax.set_title(title)
     ax.set_xlabel("Drift time")
     ax.set_ylabel("Retention time")

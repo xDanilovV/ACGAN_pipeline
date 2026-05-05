@@ -1,3 +1,4 @@
 gc-ims-tools
 numpy
+scikit-learn
 torch

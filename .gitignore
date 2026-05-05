@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .idea/
 outputs/
+outputs*/
+data_fermentation/
+*.mea
 *.pt
 *.pth
 *.npz

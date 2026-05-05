@@ -83,6 +83,50 @@ The default keeps drift-time values after `1.05` in RIP-relative coordinates.
 This is a practical first setting from the documented gc-ims-tools workflow;
 we should tune it by visually inspecting your spectra.
 
+Before long training runs, compare resize choices:
+
+```powershell
+.\.venv\Scripts\python.exe -m acgan_pipeline.data.export_preprocessing_preview `
+  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
+  --height 384 `
+  --width 128 `
+  --resize-mode area
+```
+
+The original processed spectra are roughly `6123 x 1900`, so square `128 x 128`
+is too compressed for thesis-quality synthetic spectra. Prefer rectangular
+model inputs such as `384 x 128` or `512 x 160`, both divisible by 16.
+
+For a peak-aware crop, compute a shared high-intensity window before resizing:
+
+```powershell
+.\.venv\Scripts\python.exe -m acgan_pipeline.data.export_preprocessing_preview `
+  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
+  --peak-crop `
+  --height 512 `
+  --width 128 `
+  --resize-mode area
+```
+
+Training with the shared crop:
+
+```powershell
+.\.venv\Scripts\python.exe -m acgan_pipeline.main `
+  --input-format mea `
+  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
+  --mea-label-mode class `
+  --peak-crop `
+  --height 512 `
+  --width 128 `
+  --resize-mode area `
+  --epochs 100 `
+  --batch-size 4 `
+  --samples-per-class 30 `
+  --output-dir outputs_peakcrop_512x128_svm `
+  --classifier svm `
+  --synthetic-viz-denormalized
+```
+
 ## Outputs
 
 Each run writes to `outputs/` by default:

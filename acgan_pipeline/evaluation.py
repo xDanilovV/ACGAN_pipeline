@@ -8,6 +8,10 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -22,6 +26,8 @@ class ClassifierConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     test_fraction: float = 0.2
     seed: int = 42
+    classifier_type: str = "svm"
+    pca_components: int = 50
 
 
 class SpectraTensorDataset(Dataset):
@@ -106,12 +112,13 @@ def run_core_evaluation_suite(
     num_epochs: int,
     output_dir: str | Path,
     seed: int = 42,
+    classifier_type: str = "svm",
 ) -> dict[str, dict[str, object]]:
     """Run thesis-facing classifier experiments for AC-GAN augmentation."""
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    config = ClassifierConfig(num_epochs=num_epochs, seed=seed)
+    config = ClassifierConfig(num_epochs=num_epochs, seed=seed, classifier_type=classifier_type)
     num_classes = int(np.unique(real_labels).size)
 
     train_idx, test_idx = stratified_train_test_split(real_labels, config.test_fraction, seed)
@@ -178,6 +185,10 @@ def run_core_evaluation_suite(
     )
     experiments["summary"] = {
         "accuracy_improvement_real_plus_synthetic": improvement,
+        "real_only_accuracy": experiments["real_only_test_real"]["accuracy"],
+        "real_plus_synthetic_accuracy": experiments["real_plus_synthetic_test_real"]["accuracy"],
+        "real_only_macro_f1": experiments["real_only_test_real"]["macro_f1"],
+        "real_plus_synthetic_macro_f1": experiments["real_plus_synthetic_test_real"]["macro_f1"],
         "config": asdict(config),
         "num_real_train": int(len(real_train[1])),
         "num_real_test": int(len(real_test[1])),
@@ -199,6 +210,17 @@ def train_and_evaluate_classifier(
     synthetic_count: int = 0,
 ) -> dict[str, object]:
     """Train a downstream classifier and return classification metrics."""
+
+    if config.classifier_type == "svm":
+        return train_and_evaluate_svm_classifier(
+            train_data=train_data,
+            test_data=test_data,
+            num_classes=num_classes,
+            config=config,
+            synthetic_count=synthetic_count,
+        )
+    if config.classifier_type != "cnn":
+        raise ValueError("classifier_type must be 'svm' or 'cnn'")
 
     torch.manual_seed(config.seed)
     train_samples, train_labels = train_data
@@ -258,6 +280,44 @@ def train_and_evaluate_classifier(
     metrics["num_train"] = int(len(train_labels))
     metrics["num_test"] = int(len(test_labels))
     metrics["num_synthetic_in_train"] = int(synthetic_count)
+    metrics["classifier_type"] = "cnn"
+    return metrics
+
+
+def train_and_evaluate_svm_classifier(
+    *,
+    train_data: tuple[np.ndarray, np.ndarray],
+    test_data: tuple[np.ndarray, np.ndarray],
+    num_classes: int,
+    config: ClassifierConfig,
+    synthetic_count: int = 0,
+) -> dict[str, object]:
+    """Classical PCA + SVM baseline for small GC-IMS datasets.
+
+    With only 214 real spectra, this is a more reliable first downstream
+    classifier than a CNN trained from scratch.
+    """
+
+    train_samples, train_labels = train_data
+    test_samples, test_labels = test_data
+    train_flat = np.asarray(train_samples, dtype=np.float32).reshape(len(train_samples), -1)
+    test_flat = np.asarray(test_samples, dtype=np.float32).reshape(len(test_samples), -1)
+    max_components = max(1, min(config.pca_components, train_flat.shape[0] - 1, train_flat.shape[1]))
+    classifier = Pipeline(
+        steps=[
+            ("scale", StandardScaler()),
+            ("pca", PCA(n_components=max_components, random_state=config.seed)),
+            ("svc", SVC(kernel="rbf", C=10.0, gamma="scale", class_weight="balanced", random_state=config.seed)),
+        ]
+    )
+    classifier.fit(train_flat, train_labels)
+    y_pred = classifier.predict(test_flat)
+    metrics = classification_report(np.asarray(test_labels), np.asarray(y_pred), num_classes)
+    metrics["num_train"] = int(len(train_labels))
+    metrics["num_test"] = int(len(test_labels))
+    metrics["num_synthetic_in_train"] = int(synthetic_count)
+    metrics["classifier_type"] = "svm"
+    metrics["pca_components"] = int(max_components)
     return metrics
 
 
@@ -370,3 +430,36 @@ def _save_evaluation_outputs(results: dict[str, dict[str, object]], output_dir: 
         with (output_dir / f"{name}_confusion_matrix.csv").open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerows(matrix)
+        _save_confusion_matrix_png(
+            np.asarray(matrix, dtype=np.int64),
+            output_dir / f"{name}_confusion_matrix.png",
+            title=name.replace("_", " "),
+        )
+
+    summary = results.get("summary", {})
+    with (output_dir / "summary.txt").open("w", encoding="utf-8") as f:
+        for key, value in summary.items():
+            if key == "config":
+                continue
+            f.write(f"{key}: {value}\n")
+
+
+def _save_confusion_matrix_png(matrix: np.ndarray, path: Path, *, title: str) -> None:
+    import matplotlib.pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True)
+    image = ax.imshow(matrix, cmap="Blues")
+    ax.set_title(title)
+    ax.set_xlabel("Predicted class")
+    ax.set_ylabel("True class")
+    ax.set_xticks(np.arange(matrix.shape[1]))
+    ax.set_yticks(np.arange(matrix.shape[0]))
+    for row in range(matrix.shape[0]):
+        for col in range(matrix.shape[1]):
+            value = int(matrix[row, col])
+            if value:
+                ax.text(col, row, str(value), ha="center", va="center", color="black", fontsize=8)
+    fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)

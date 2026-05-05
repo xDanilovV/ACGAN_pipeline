@@ -30,6 +30,7 @@ class GCIMSDataset(Dataset):
         *,
         loader: ArrayLoader | None = None,
         target_shape: tuple[int, int] = (128, 128),
+        resize_mode: str = "area",
         normalize: bool = True,
         min_value: float | None = None,
         max_value: float | None = None,
@@ -44,6 +45,7 @@ class GCIMSDataset(Dataset):
         self.samples = np.asarray(samples, dtype=np.float32)
         self.labels = np.asarray(labels, dtype=np.int64)
         self.target_shape = target_shape
+        self.resize_mode = resize_mode
         self.normalize = normalize
         self.transform = transform
 
@@ -87,12 +89,10 @@ class GCIMSDataset(Dataset):
     def _resize(self, sample: Tensor) -> Tensor:
         if tuple(sample.shape[-2:]) == self.target_shape:
             return sample
-        resized = F.interpolate(
-            sample.unsqueeze(0),
-            size=self.target_shape,
-            mode="bilinear",
-            align_corners=False,
-        )
+        kwargs = {"size": self.target_shape, "mode": self.resize_mode}
+        if self.resize_mode in {"linear", "bilinear", "bicubic", "trilinear"}:
+            kwargs["align_corners"] = False
+        resized = F.interpolate(sample.unsqueeze(0), **kwargs)
         return resized.squeeze(0)
 
     def _normalize_to_minus_one_one(self, sample: Tensor) -> Tensor:

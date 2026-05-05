@@ -27,6 +27,23 @@ class MeaPreprocessingConfig:
     retention_stop: float | None = None
 
 
+@dataclass(frozen=True)
+class PeakCropConfig:
+    """Shared peak-aware crop computed from all spectra before resizing.
+
+    The crop is not chosen independently for each sample. We first detect rows
+    and columns that repeatedly contain high-intensity peak support across the
+    dataset, then apply one shared bounding box to every sample.
+    """
+
+    enabled: bool = False
+    percentile: float = 99.7
+    relative_threshold: float = 0.05
+    support_fraction: float = 0.03
+    margin_rt: int = 256
+    margin_dt: int = 48
+
+
 def load_mea_folder(
     folder: str | Path,
     labels_csv: str | Path | None = None,
@@ -34,6 +51,8 @@ def load_mea_folder(
     config: MeaPreprocessingConfig | None = None,
     label_mode: str = "class",
     target_shape: tuple[int, int] | None = None,
+    resize_mode: str = "area",
+    peak_crop: PeakCropConfig | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, object]]]:
     """Load all ``.mea`` files from a folder.
 
@@ -46,26 +65,38 @@ def load_mea_folder(
 
     folder = Path(folder)
     label_map = _read_label_map(labels_csv) if labels_csv is not None else None
+    paths = sorted(folder.rglob("*.mea"))
+    if not paths:
+        raise ValueError(f"no .mea files found in {folder}")
+
+    peak_crop = peak_crop or PeakCropConfig(enabled=False)
+    shared_crop = None
+    crop_report = None
+    if peak_crop.enabled:
+        shared_crop, crop_report = compute_shared_peak_crop(paths, config=config, crop_config=peak_crop)
+
     spectra = []
     labels = []
     metadata = []
-    for path in sorted(folder.rglob("*.mea")):
+    for path in paths:
         label = _label_for_path(path, folder, label_map, label_mode=label_mode)
         if label is None:
             raise ValueError(f"missing label for {path.name}")
         values, info = load_mea_file(path, config=config)
+        if shared_crop is not None:
+            values = _apply_index_crop(values, shared_crop)
+            info["peak_crop_shape"] = list(values.shape)
+            info["peak_crop"] = crop_report
         if target_shape is not None:
-            values = _resize_array(values, target_shape)
+            values = _resize_array(values, target_shape, resize_mode=resize_mode)
             info["tensor_shape"] = list(values.shape)
+            info["resize_mode"] = resize_mode
         spectra.append(values)
         labels.append(label)
         info["label"] = label
         info["culture_type"] = _culture_type_for_path(path, folder)
         info["batch"] = path.parent.name
         metadata.append(info)
-
-    if not spectra:
-        raise ValueError(f"no .mea files found in {folder}")
 
     encoded_labels, label_mapping = _encode_labels(labels)
     for item in metadata:
@@ -109,6 +140,66 @@ def load_mea_file(
         "drift_time_max": float(np.max(spectrum.drift_time)),
     }
     return values, info
+
+
+def compute_shared_peak_crop(
+    paths: list[Path],
+    *,
+    config: MeaPreprocessingConfig | None,
+    crop_config: PeakCropConfig,
+) -> tuple[tuple[int, int, int, int], dict[str, object]]:
+    """Compute one shared index crop from recurring high-intensity support."""
+
+    row_support: np.ndarray | None = None
+    col_support: np.ndarray | None = None
+    processed_shapes = []
+    contributing_files = 0
+    for path in paths:
+        values, _ = load_mea_file(path, config=config)
+        processed_shapes.append(list(values.shape))
+        threshold = max(
+            float(np.percentile(values, crop_config.percentile)),
+            float(np.max(values)) * crop_config.relative_threshold,
+        )
+        mask = values >= threshold
+        if not np.any(mask):
+            continue
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        row_support = _add_support(row_support, rows)
+        col_support = _add_support(col_support, cols)
+        contributing_files += 1
+
+    if row_support is None or col_support is None:
+        raise ValueError("peak crop failed: no peak support detected")
+
+    min_support = max(1, int(np.ceil(len(paths) * crop_config.support_fraction)))
+    row_indices = np.flatnonzero(row_support >= min_support)
+    col_indices = np.flatnonzero(col_support >= min_support)
+    if row_indices.size == 0 or col_indices.size == 0:
+        raise ValueError("peak crop failed: support threshold was too strict")
+
+    row_start = max(0, int(row_indices[0]) - crop_config.margin_rt)
+    row_stop = min(len(row_support), int(row_indices[-1]) + crop_config.margin_rt + 1)
+    col_start = max(0, int(col_indices[0]) - crop_config.margin_dt)
+    col_stop = min(len(col_support), int(col_indices[-1]) + crop_config.margin_dt + 1)
+    crop = (row_start, row_stop, col_start, col_stop)
+    report = {
+        "enabled": True,
+        "config": asdict(crop_config),
+        "crop_indices": {
+            "retention_start": row_start,
+            "retention_stop": row_stop,
+            "drift_start": col_start,
+            "drift_stop": col_stop,
+        },
+        "crop_shape": [row_stop - row_start, col_stop - col_start],
+        "num_files": len(paths),
+        "contributing_files": contributing_files,
+        "min_support_count": min_support,
+        "processed_shape_examples": processed_shapes[:5],
+    }
+    return crop, report
 
 
 def _read_label_map(labels_csv: str | Path) -> dict[str, str]:
@@ -168,6 +259,23 @@ def _encode_labels(labels: list[str]) -> tuple[np.ndarray, dict[str, int]]:
     return np.asarray([mapping[label] for label in labels], dtype=np.int64), mapping
 
 
+def _add_support(existing: np.ndarray | None, support: np.ndarray) -> np.ndarray:
+    support_int = support.astype(np.int32)
+    if existing is None:
+        return support_int
+    if len(support_int) > len(existing):
+        padded = np.zeros(len(support_int), dtype=np.int32)
+        padded[: len(existing)] = existing
+        existing = padded
+    existing[: len(support_int)] += support_int
+    return existing
+
+
+def _apply_index_crop(values: np.ndarray, crop: tuple[int, int, int, int]) -> np.ndarray:
+    row_start, row_stop, col_start, col_stop = crop
+    return values[row_start:min(row_stop, values.shape[0]), col_start:min(col_stop, values.shape[1])]
+
+
 def _import_gcims():
     try:
         import ims
@@ -179,7 +287,10 @@ def _import_gcims():
     return ims
 
 
-def _resize_array(values: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
+def _resize_array(values: np.ndarray, target_shape: tuple[int, int], *, resize_mode: str = "area") -> np.ndarray:
     tensor = torch.from_numpy(np.asarray(values, dtype=np.float32))[None, None]
-    resized = F.interpolate(tensor, size=target_shape, mode="bilinear", align_corners=False)
+    kwargs = {"size": target_shape, "mode": resize_mode}
+    if resize_mode in {"linear", "bilinear", "bicubic", "trilinear"}:
+        kwargs["align_corners"] = False
+    resized = F.interpolate(tensor, **kwargs)
     return resized[0, 0].numpy().astype(np.float32)
