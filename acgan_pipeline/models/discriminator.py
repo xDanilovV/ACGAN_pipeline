@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 
@@ -36,12 +37,14 @@ class Discriminator(nn.Module):
         num_classes: int,
         input_shape: tuple[int, int] = (128, 128),
         base_channels: int = 32,
+        projection_scale: float = 0.1,
     ) -> None:
         super().__init__()
         if input_shape[0] % 16 != 0 or input_shape[1] % 16 != 0:
             raise ValueError("input_shape dimensions must be divisible by 16")
 
         self.num_classes = num_classes
+        self.projection_scale = projection_scale
 
         self.features = nn.Sequential(
             AsymmetricDownsampleBlock(1, base_channels, use_norm=False),
@@ -67,6 +70,10 @@ class Discriminator(nn.Module):
         shared = self.shared(self.pool(features))
         real_fake_logits = self.real_fake_head(shared).squeeze(1)
         if labels is not None:
-            real_fake_logits = real_fake_logits + torch.sum(self.projection(labels) * shared, dim=1)
+            projected = torch.sum(
+                F.normalize(self.projection(labels), dim=1) * F.normalize(shared, dim=1),
+                dim=1,
+            )
+            real_fake_logits = real_fake_logits + self.projection_scale * projected
         class_logits = self.class_head(shared)
         return real_fake_logits, class_logits

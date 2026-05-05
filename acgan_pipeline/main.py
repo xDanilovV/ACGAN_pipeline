@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-smoothing", type=float, default=0.0)
     parser.add_argument("--instance-noise-std", type=float, default=0.0)
     parser.add_argument("--instance-noise-decay-epochs", type=int, default=50)
+    parser.add_argument("--projection-scale", type=float, default=0.1)
     parser.add_argument("--sample-every", type=int, default=10)
     parser.add_argument("--checkpoint-every", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
@@ -143,6 +144,7 @@ def main() -> None:
         label_smoothing=args.label_smoothing,
         instance_noise_std=args.instance_noise_std,
         instance_noise_decay_epochs=args.instance_noise_decay_epochs,
+        projection_scale=args.projection_scale,
         sample_every=args.sample_every,
         checkpoint_every=args.checkpoint_every,
         output_dir=args.output_dir,

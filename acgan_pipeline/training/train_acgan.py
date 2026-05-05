@@ -29,6 +29,7 @@ class TrainConfig:
     label_smoothing: float = 0.0
     instance_noise_std: float = 0.0
     instance_noise_decay_epochs: int = 50
+    projection_scale: float = 0.1
     sample_every: int = 10
     checkpoint_every: int = 10
     output_dir: str = "outputs"
@@ -65,7 +66,7 @@ def train_acgan(
     )
 
     generator = Generator(config.noise_dim, num_classes, image_shape).to(device)
-    discriminator = Discriminator(num_classes, image_shape).to(device)
+    discriminator = Discriminator(num_classes, image_shape, projection_scale=config.projection_scale).to(device)
     generator.apply(_weights_init)
     discriminator.apply(_weights_init)
 
@@ -82,6 +83,12 @@ def train_acgan(
         g_meter = AverageMeter()
         d_meter = AverageMeter()
         acc_meter = AverageMeter()
+        g_adv_meter = AverageMeter()
+        g_cls_meter = AverageMeter()
+        g_tv_meter = AverageMeter()
+        d_adv_real_meter = AverageMeter()
+        d_adv_fake_meter = AverageMeter()
+        d_cls_meter = AverageMeter()
         instance_noise_std = _current_instance_noise(config, epoch)
         real_target = 1.0 - config.label_smoothing
 
@@ -98,7 +105,7 @@ def train_acgan(
             noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
             real_logits, real_class_logits = discriminator(noisy_real, labels)
             fake_logits, _ = discriminator(noisy_fake, labels)
-            d_loss, _ = discriminator_loss(
+            d_loss, d_parts = discriminator_loss(
                 real_logits,
                 fake_logits,
                 real_class_logits,
@@ -114,7 +121,7 @@ def train_acgan(
             noise = torch.randn(batch_size, config.noise_dim, device=device)
             fake_samples = generator(noise, labels)
             fake_logits, fake_class_logits = discriminator(fake_samples, labels)
-            g_loss, _ = generator_loss(
+            g_loss, g_parts = generator_loss(
                 fake_logits,
                 fake_class_logits,
                 labels,
@@ -130,11 +137,23 @@ def train_acgan(
             g_meter.update(float(g_loss.detach().cpu()), batch_size)
             d_meter.update(float(d_loss.detach().cpu()), batch_size)
             acc_meter.update(acc, batch_size)
+            g_adv_meter.update(g_parts["g_adv"], batch_size)
+            g_cls_meter.update(g_parts["g_cls"], batch_size)
+            g_tv_meter.update(g_parts["g_tv"], batch_size)
+            d_adv_real_meter.update(d_parts["d_adv_real"], batch_size)
+            d_adv_fake_meter.update(d_parts["d_adv_fake"], batch_size)
+            d_cls_meter.update(d_parts["d_cls"], batch_size)
 
         epoch_log = {
             "epoch": float(epoch),
             "generator_loss": g_meter.average,
             "discriminator_loss": d_meter.average,
+            "g_adv": g_adv_meter.average,
+            "g_cls": g_cls_meter.average,
+            "g_tv": g_tv_meter.average,
+            "d_adv_real": d_adv_real_meter.average,
+            "d_adv_fake": d_adv_fake_meter.average,
+            "d_cls": d_cls_meter.average,
             "classification_accuracy": acc_meter.average,
             "instance_noise_std": instance_noise_std,
             "seconds": time.perf_counter() - epoch_started_at,
