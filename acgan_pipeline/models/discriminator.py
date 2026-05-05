@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import torch
 from torch import Tensor, nn
+
+
+def _sn(module: nn.Module) -> nn.Module:
+    return nn.utils.spectral_norm(module)
 
 
 class AsymmetricDownsampleBlock(nn.Module):
@@ -9,9 +14,9 @@ class AsymmetricDownsampleBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, use_norm: bool = True) -> None:
         super().__init__()
         layers: list[nn.Module] = [
-            nn.Conv2d(in_channels, out_channels, kernel_size=(1, 5), stride=(1, 2), padding=(0, 2)),
+            _sn(nn.Conv2d(in_channels, out_channels, kernel_size=(1, 5), stride=(1, 2), padding=(0, 2))),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0)),
+            _sn(nn.Conv2d(out_channels, out_channels, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0))),
             nn.LeakyReLU(0.2, inplace=True),
         ]
         if use_norm:
@@ -24,7 +29,7 @@ class AsymmetricDownsampleBlock(nn.Module):
 
 
 class Discriminator(nn.Module):
-    """AC-GAN discriminator with adversarial and auxiliary class heads."""
+    """AC-GAN discriminator with projection-conditioned adversarial score."""
 
     def __init__(
         self,
@@ -45,20 +50,23 @@ class Discriminator(nn.Module):
             AsymmetricDownsampleBlock(base_channels * 4, base_channels * 8),
         )
 
-        feature_shape = (input_shape[0] // 16, input_shape[1] // 16)
-        flattened = base_channels * 8 * feature_shape[0] * feature_shape[1]
+        self.pool = nn.AdaptiveAvgPool2d((4, 4))
+        flattened = base_channels * 8 * 4 * 4
         self.shared = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(flattened, 512),
+            _sn(nn.Linear(flattened, 512)),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(0.3),
         )
-        self.real_fake_head = nn.Linear(512, 1)
-        self.class_head = nn.Linear(512, num_classes)
+        self.real_fake_head = _sn(nn.Linear(512, 1))
+        self.projection = nn.Embedding(num_classes, 512)
+        self.class_head = _sn(nn.Linear(512, num_classes))
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, labels: Tensor | None = None) -> tuple[Tensor, Tensor]:
         features = self.features(x)
-        shared = self.shared(features)
+        shared = self.shared(self.pool(features))
         real_fake_logits = self.real_fake_head(shared).squeeze(1)
+        if labels is not None:
+            real_fake_logits = real_fake_logits + torch.sum(self.projection(labels) * shared, dim=1)
         class_logits = self.class_head(shared)
         return real_fake_logits, class_logits

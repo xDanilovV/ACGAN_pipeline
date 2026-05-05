@@ -113,19 +113,33 @@ def run_core_evaluation_suite(
     output_dir: str | Path,
     seed: int = 42,
     classifier_type: str = "svm",
+    normalization_min: float | None = None,
+    normalization_max: float | None = None,
+    test_fraction: float = 0.2,
+    train_indices: np.ndarray | None = None,
+    test_indices: np.ndarray | None = None,
 ) -> dict[str, dict[str, object]]:
     """Run thesis-facing classifier experiments for AC-GAN augmentation."""
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    config = ClassifierConfig(num_epochs=num_epochs, seed=seed, classifier_type=classifier_type)
+    config = ClassifierConfig(
+        num_epochs=num_epochs,
+        seed=seed,
+        classifier_type=classifier_type,
+        test_fraction=test_fraction,
+    )
     num_classes = int(np.unique(real_labels).size)
 
-    train_idx, test_idx = stratified_train_test_split(real_labels, config.test_fraction, seed)
+    if train_indices is None or test_indices is None:
+        train_idx, test_idx = stratified_train_test_split(real_labels, config.test_fraction, seed)
+    else:
+        train_idx = np.asarray(train_indices, dtype=np.int64)
+        test_idx = np.asarray(test_indices, dtype=np.int64)
     real_train_samples = real_samples[train_idx]
     real_test_samples = real_samples[test_idx]
-    real_min = float(np.min(real_train_samples))
-    real_max = float(np.max(real_train_samples))
+    real_min = float(np.min(real_train_samples)) if normalization_min is None else normalization_min
+    real_max = float(np.max(real_train_samples)) if normalization_max is None else normalization_max
     real_train_processed = _resize_samples(
         _normalize_to_minus_one_one(real_train_samples, real_min, real_max),
         image_shape,
@@ -354,6 +368,7 @@ def classification_report(y_true: np.ndarray, y_pred: np.ndarray, num_classes: i
         "per_class_recall": recall,
         "per_class_f1": f1,
         "support": [int(value) for value in support],
+        "predicted_support": [int(value) for value in matrix.sum(axis=0)],
         "confusion_matrix": matrix.astype(int).tolist(),
     }
 
@@ -373,9 +388,15 @@ def stratified_train_test_split(labels: np.ndarray, test_fraction: float, seed: 
     for class_id in np.unique(labels):
         class_indices = np.flatnonzero(labels == class_id)
         rng.shuffle(class_indices)
+        if len(class_indices) == 1:
+            train_indices.append(class_indices)
+            continue
         test_count = max(1, int(round(len(class_indices) * test_fraction)))
+        test_count = min(test_count, len(class_indices) - 1)
         test_indices.append(class_indices[:test_count])
         train_indices.append(class_indices[test_count:])
+    if not test_indices:
+        raise ValueError("cannot create a test split: every class has only one sample")
     return np.concatenate(train_indices), np.concatenate(test_indices)
 
 

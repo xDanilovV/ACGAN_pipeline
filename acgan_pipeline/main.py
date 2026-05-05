@@ -8,7 +8,7 @@ import numpy as np
 
 from acgan_pipeline.data.dataset import GCIMSDataset
 from acgan_pipeline.data.mea_loader import MeaPreprocessingConfig, PeakCropConfig, load_mea_folder
-from acgan_pipeline.evaluation import run_core_evaluation_suite
+from acgan_pipeline.evaluation import run_core_evaluation_suite, stratified_train_test_split
 from acgan_pipeline.preprocessing import PreprocessingConfig, preprocess_dataset
 from acgan_pipeline.training.train_acgan import TrainConfig, generate_samples, load_generator_from_checkpoint, train_acgan
 from acgan_pipeline.visualization.gcims_plots import export_preprocessing_comparison, export_real_vs_generated_comparison
@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--class-loss-weight", type=float, default=1.0)
     parser.add_argument("--tv-loss-weight", type=float, default=1e-4)
+    parser.add_argument("--label-smoothing", type=float, default=0.0)
+    parser.add_argument("--instance-noise-std", type=float, default=0.0)
+    parser.add_argument("--instance-noise-decay-epochs", type=int, default=50)
     parser.add_argument("--sample-every", type=int, default=10)
     parser.add_argument("--checkpoint-every", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
@@ -56,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--peak-margin-rt", type=int, default=256)
     parser.add_argument("--peak-margin-dt", type=int, default=48)
     parser.add_argument("--eval-epochs", type=int, default=25)
+    parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--classifier", choices=["svm", "cnn"], default="svm", help="Downstream evaluation classifier.")
     parser.add_argument("--generator-checkpoint", type=str, default=None, help="Load a saved generator checkpoint and skip AC-GAN training.")
     parser.add_argument("--skip-evaluation", action="store_true")
@@ -114,9 +118,18 @@ def main() -> None:
             title="Real spectrum preprocessing",
         )
 
+    train_indices = None
+    test_indices = None
+    gan_samples = processed_samples
+    gan_labels = labels
+    if not args.skip_evaluation:
+        train_indices, test_indices = stratified_train_test_split(labels, args.test_fraction, args.seed)
+        gan_samples = processed_samples[train_indices]
+        gan_labels = labels[train_indices]
+
     dataset = GCIMSDataset(
-        processed_samples,
-        labels,
+        gan_samples,
+        gan_labels,
         target_shape=(args.height, args.width),
         resize_mode=args.resize_mode,
     )
@@ -127,6 +140,9 @@ def main() -> None:
         lr=args.lr,
         class_loss_weight=args.class_loss_weight,
         tv_loss_weight=args.tv_loss_weight,
+        label_smoothing=args.label_smoothing,
+        instance_noise_std=args.instance_noise_std,
+        instance_noise_decay_epochs=args.instance_noise_decay_epochs,
         sample_every=args.sample_every,
         checkpoint_every=args.checkpoint_every,
         output_dir=args.output_dir,
@@ -161,8 +177,8 @@ def main() -> None:
         class_id = min(max(args.viz_class_id, 0), dataset.num_classes - 1)
         synthetic_for_plot = synthetic_samples[0]
         if args.synthetic_viz_denormalized:
-            synthetic_for_plot = _denormalize_for_visualization(synthetic_for_plot, processed_samples)
-            denormalized = _denormalize_for_visualization(synthetic_samples, processed_samples)
+            synthetic_for_plot = _denormalize_for_visualization(synthetic_for_plot, dataset.min_value, dataset.max_value)
+            denormalized = _denormalize_for_visualization(synthetic_samples, dataset.min_value, dataset.max_value)
             np.savez_compressed(
                 output_dir / "synthetic_samples_denormalized_for_visualization.npz",
                 samples=denormalized,
@@ -178,7 +194,11 @@ def main() -> None:
         synthetic_idx = int(np.flatnonzero(synthetic_labels == class_id)[0])
         generated_for_comparison = synthetic_samples[synthetic_idx]
         if args.synthetic_viz_denormalized:
-            generated_for_comparison = _denormalize_for_visualization(generated_for_comparison, processed_samples)
+            generated_for_comparison = _denormalize_for_visualization(
+                generated_for_comparison,
+                dataset.min_value,
+                dataset.max_value,
+            )
         class_name = _class_name_from_report(preprocessing_report, class_id)
         export_real_vs_generated_comparison(
             processed_samples[real_idx],
@@ -198,6 +218,11 @@ def main() -> None:
             output_dir=output_dir / "evaluation",
             classifier_type=args.classifier,
             seed=args.seed,
+            normalization_min=dataset.min_value,
+            normalization_max=dataset.max_value,
+            test_fraction=args.test_fraction,
+            train_indices=train_indices,
+            test_indices=test_indices,
         )
         summary = evaluation["summary"]
         metrics_path = output_dir / "evaluation" / "metrics.json"
@@ -209,9 +234,7 @@ def main() -> None:
         )
 
 
-def _denormalize_for_visualization(sample: np.ndarray, reference_samples: np.ndarray) -> np.ndarray:
-    min_value = float(np.min(reference_samples))
-    max_value = float(np.max(reference_samples))
+def _denormalize_for_visualization(sample: np.ndarray, min_value: float, max_value: float) -> np.ndarray:
     return ((sample + 1.0) / 2.0) * (max_value - min_value) + min_value
 
 

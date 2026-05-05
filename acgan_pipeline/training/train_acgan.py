@@ -26,6 +26,9 @@ class TrainConfig:
     betas: tuple[float, float] = (0.5, 0.999)
     class_loss_weight: float = 1.0
     tv_loss_weight: float = 1e-4
+    label_smoothing: float = 0.0
+    instance_noise_std: float = 0.0
+    instance_noise_decay_epochs: int = 50
     sample_every: int = 10
     checkpoint_every: int = 10
     output_dir: str = "outputs"
@@ -79,6 +82,8 @@ def train_acgan(
         g_meter = AverageMeter()
         d_meter = AverageMeter()
         acc_meter = AverageMeter()
+        instance_noise_std = _current_instance_noise(config, epoch)
+        real_target = 1.0 - config.label_smoothing
 
         for real_samples, labels in dataloader:
             real_samples = real_samples.to(device, non_blocking=True)
@@ -89,14 +94,17 @@ def train_acgan(
             optimizer_d.zero_grad(set_to_none=True)
             noise = torch.randn(batch_size, config.noise_dim, device=device)
             fake_samples = generator(noise, labels).detach()
-            real_logits, real_class_logits = discriminator(real_samples)
-            fake_logits, _ = discriminator(fake_samples)
+            noisy_real = _add_instance_noise(real_samples, instance_noise_std)
+            noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
+            real_logits, real_class_logits = discriminator(noisy_real, labels)
+            fake_logits, _ = discriminator(noisy_fake, labels)
             d_loss, _ = discriminator_loss(
                 real_logits,
                 fake_logits,
                 real_class_logits,
                 labels,
                 class_weight=config.class_loss_weight,
+                real_target=real_target,
             )
             d_loss.backward()
             optimizer_d.step()
@@ -105,7 +113,7 @@ def train_acgan(
             optimizer_g.zero_grad(set_to_none=True)
             noise = torch.randn(batch_size, config.noise_dim, device=device)
             fake_samples = generator(noise, labels)
-            fake_logits, fake_class_logits = discriminator(fake_samples)
+            fake_logits, fake_class_logits = discriminator(fake_samples, labels)
             g_loss, _ = generator_loss(
                 fake_logits,
                 fake_class_logits,
@@ -113,6 +121,7 @@ def train_acgan(
                 fake_samples,
                 class_weight=config.class_loss_weight,
                 tv_weight=config.tv_loss_weight,
+                real_target=real_target,
             )
             g_loss.backward()
             optimizer_g.step()
@@ -127,6 +136,7 @@ def train_acgan(
             "generator_loss": g_meter.average,
             "discriminator_loss": d_meter.average,
             "classification_accuracy": acc_meter.average,
+            "instance_noise_std": instance_noise_std,
             "seconds": time.perf_counter() - epoch_started_at,
         }
         history.append(epoch_log)
@@ -244,7 +254,8 @@ def _save_generated_numpy(generator: Generator, labels: torch.Tensor, noise_dim:
 
 def _weights_init(module: nn.Module) -> None:
     if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-        nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        weight = getattr(module, "weight_orig", module.weight)
+        nn.init.normal_(weight, mean=0.0, std=0.02)
         if module.bias is not None:
             nn.init.zeros_(module.bias)
     elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
@@ -260,3 +271,18 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _current_instance_noise(config: TrainConfig, epoch: int) -> float:
+    if config.instance_noise_std <= 0:
+        return 0.0
+    if config.instance_noise_decay_epochs <= 0:
+        return config.instance_noise_std
+    progress = min(max((epoch - 1) / config.instance_noise_decay_epochs, 0.0), 1.0)
+    return config.instance_noise_std * (1.0 - progress)
+
+
+def _add_instance_noise(samples: torch.Tensor, std: float) -> torch.Tensor:
+    if std <= 0:
+        return samples
+    return (samples + torch.randn_like(samples) * std).clamp(-1.0, 1.0)

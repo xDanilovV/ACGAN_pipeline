@@ -5,10 +5,17 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-def adversarial_bce_loss(logits: Tensor, target_is_real: bool) -> Tensor:
+def adversarial_bce_loss(
+    logits: Tensor,
+    target_is_real: bool,
+    *,
+    real_target: float = 1.0,
+    fake_target: float = 0.0,
+) -> Tensor:
     """Binary cross entropy on discriminator logits."""
 
-    targets = torch.ones_like(logits) if target_is_real else torch.zeros_like(logits)
+    target_value = real_target if target_is_real else fake_target
+    targets = torch.full_like(logits, target_value)
     return F.binary_cross_entropy_with_logits(logits, targets)
 
 
@@ -39,9 +46,11 @@ def discriminator_loss(
     real_class_logits: Tensor,
     labels: Tensor,
     class_weight: float = 1.0,
+    real_target: float = 1.0,
+    fake_target: float = 0.0,
 ) -> tuple[Tensor, dict[str, float]]:
-    adv_real = adversarial_bce_loss(real_logits, True)
-    adv_fake = adversarial_bce_loss(fake_logits, False)
+    adv_real = adversarial_bce_loss(real_logits, True, real_target=real_target, fake_target=fake_target)
+    adv_fake = adversarial_bce_loss(fake_logits, False, real_target=real_target, fake_target=fake_target)
     cls = classification_loss(real_class_logits, labels)
     loss = adv_real + adv_fake + class_weight * cls
     parts = {
@@ -59,8 +68,9 @@ def generator_loss(
     fake_samples: Tensor,
     class_weight: float = 1.0,
     tv_weight: float = 1e-4,
+    real_target: float = 1.0,
 ) -> tuple[Tensor, dict[str, float]]:
-    adv = adversarial_bce_loss(fake_logits, True)
+    adv = adversarial_bce_loss(fake_logits, True, real_target=real_target)
     cls = classification_loss(fake_class_logits, labels)
     tv = total_variation_loss(fake_samples)
     loss = adv + class_weight * cls + tv_weight * tv
