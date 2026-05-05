@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,7 @@ class TrainConfig:
     output_dir: str = "outputs"
     num_workers: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    seed: int = 42
 
 
 def train_acgan(
@@ -42,6 +44,7 @@ def train_acgan(
     """Train an AC-GAN on arbitrary 2D scientific spectra."""
 
     config = config or TrainConfig()
+    _set_seed(config.seed)
     device = torch.device(config.device)
     output_dir = Path(config.output_dir)
     checkpoint_dir = output_dir / "checkpoints"
@@ -249,3 +252,11 @@ def _weights_init(module: nn.Module) -> None:
             nn.init.normal_(module.weight, mean=1.0, std=0.02)
         if module.bias is not None:
             nn.init.zeros_(module.bias)
+
+
+def _set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)

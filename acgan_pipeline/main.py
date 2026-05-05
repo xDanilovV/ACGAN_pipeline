@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--noise-dim", type=int, default=100)
+    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--class-loss-weight", type=float, default=1.0)
+    parser.add_argument("--tv-loss-weight", type=float, default=1e-4)
+    parser.add_argument("--sample-every", type=int, default=10)
+    parser.add_argument("--checkpoint-every", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default="outputs")
     parser.add_argument("--samples-per-class", type=int, default=100)
     parser.add_argument("--rip-drift-start", type=float, default=None, help="First RIP-relative drift-time value to keep.")
@@ -118,7 +124,13 @@ def main() -> None:
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         noise_dim=args.noise_dim,
+        lr=args.lr,
+        class_loss_weight=args.class_loss_weight,
+        tv_loss_weight=args.tv_loss_weight,
+        sample_every=args.sample_every,
+        checkpoint_every=args.checkpoint_every,
         output_dir=args.output_dir,
+        seed=args.seed,
     )
     if args.generator_checkpoint is not None:
         generator = load_generator_from_checkpoint(
@@ -185,6 +197,7 @@ def main() -> None:
             num_epochs=args.eval_epochs,
             output_dir=output_dir / "evaluation",
             classifier_type=args.classifier,
+            seed=args.seed,
         )
         summary = evaluation["summary"]
         metrics_path = output_dir / "evaluation" / "metrics.json"
