@@ -38,6 +38,7 @@ class Discriminator(nn.Module):
         input_shape: tuple[int, int] = (128, 128),
         base_channels: int = 32,
         projection_scale: float = 0.1,
+        use_norm: bool = False,
     ) -> None:
         super().__init__()
         if input_shape[0] % 16 != 0 or input_shape[1] % 16 != 0:
@@ -48,9 +49,9 @@ class Discriminator(nn.Module):
 
         self.features = nn.Sequential(
             AsymmetricDownsampleBlock(1, base_channels, use_norm=False),
-            AsymmetricDownsampleBlock(base_channels, base_channels * 2),
-            AsymmetricDownsampleBlock(base_channels * 2, base_channels * 4),
-            AsymmetricDownsampleBlock(base_channels * 4, base_channels * 8),
+            AsymmetricDownsampleBlock(base_channels, base_channels * 2, use_norm=use_norm),
+            AsymmetricDownsampleBlock(base_channels * 2, base_channels * 4, use_norm=use_norm),
+            AsymmetricDownsampleBlock(base_channels * 4, base_channels * 8, use_norm=use_norm),
         )
 
         self.pool = nn.AdaptiveAvgPool2d((4, 4))
@@ -69,7 +70,7 @@ class Discriminator(nn.Module):
         features = self.features(x)
         shared = self.shared(self.pool(features))
         real_fake_logits = self.real_fake_head(shared).squeeze(1)
-        if labels is not None:
+        if labels is not None and self.projection_scale > 0:
             projected = torch.sum(
                 F.normalize(self.projection(labels), dim=1) * F.normalize(shared, dim=1),
                 dim=1,

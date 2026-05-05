@@ -23,6 +23,8 @@ class TrainConfig:
     batch_size: int = 32
     noise_dim: int = 100
     lr: float = 2e-4
+    lr_g: float | None = None
+    lr_d: float | None = None
     betas: tuple[float, float] = (0.5, 0.999)
     class_loss_weight: float = 1.0
     tv_loss_weight: float = 1e-4
@@ -30,6 +32,11 @@ class TrainConfig:
     instance_noise_std: float = 0.0
     instance_noise_decay_epochs: int = 50
     projection_scale: float = 0.1
+    generator_base_channels: int = 256
+    discriminator_base_channels: int = 32
+    discriminator_use_norm: bool = False
+    generator_steps: int = 1
+    discriminator_update_every: int = 1
     sample_every: int = 10
     checkpoint_every: int = 10
     output_dir: str = "outputs"
@@ -65,13 +72,24 @@ def train_acgan(
         drop_last=len(dataset) >= config.batch_size,
     )
 
-    generator = Generator(config.noise_dim, num_classes, image_shape).to(device)
-    discriminator = Discriminator(num_classes, image_shape, projection_scale=config.projection_scale).to(device)
+    generator = Generator(
+        config.noise_dim,
+        num_classes,
+        image_shape,
+        base_channels=config.generator_base_channels,
+    ).to(device)
+    discriminator = Discriminator(
+        num_classes,
+        image_shape,
+        base_channels=config.discriminator_base_channels,
+        projection_scale=config.projection_scale,
+        use_norm=config.discriminator_use_norm,
+    ).to(device)
     generator.apply(_weights_init)
     discriminator.apply(_weights_init)
 
-    optimizer_g = torch.optim.Adam(generator.parameters(), lr=config.lr, betas=config.betas)
-    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=config.lr, betas=config.betas)
+    optimizer_g = torch.optim.Adam(generator.parameters(), lr=config.lr_g or config.lr, betas=config.betas)
+    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=config.lr_d or config.lr, betas=config.betas)
 
     history: list[dict[str, float]] = []
     fixed_labels = torch.arange(num_classes, device=device)
@@ -92,57 +110,61 @@ def train_acgan(
         instance_noise_std = _current_instance_noise(config, epoch)
         real_target = 1.0 - config.label_smoothing
 
-        for real_samples, labels in dataloader:
+        for batch_index, (real_samples, labels) in enumerate(dataloader):
             real_samples = real_samples.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             batch_size = real_samples.size(0)
 
             # Train discriminator on real spectra and detached synthetic spectra.
-            optimizer_d.zero_grad(set_to_none=True)
-            noise = torch.randn(batch_size, config.noise_dim, device=device)
-            fake_samples = generator(noise, labels).detach()
-            noisy_real = _add_instance_noise(real_samples, instance_noise_std)
-            noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
-            real_logits, real_class_logits = discriminator(noisy_real, labels)
-            fake_logits, _ = discriminator(noisy_fake, labels)
-            d_loss, d_parts = discriminator_loss(
-                real_logits,
-                fake_logits,
-                real_class_logits,
-                labels,
-                class_weight=config.class_loss_weight,
-                real_target=real_target,
-            )
-            d_loss.backward()
-            optimizer_d.step()
+            should_update_d = batch_index % max(1, config.discriminator_update_every) == 0
+            if should_update_d:
+                optimizer_d.zero_grad(set_to_none=True)
+                noise = torch.randn(batch_size, config.noise_dim, device=device)
+                fake_samples = generator(noise, labels).detach()
+                noisy_real = _add_instance_noise(real_samples, instance_noise_std)
+                noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
+                real_logits, real_class_logits = discriminator(noisy_real, labels)
+                fake_logits, _ = discriminator(noisy_fake, labels)
+                d_loss, d_parts = discriminator_loss(
+                    real_logits,
+                    fake_logits,
+                    real_class_logits,
+                    labels,
+                    class_weight=config.class_loss_weight,
+                    real_target=real_target,
+                )
+                d_loss.backward()
+                optimizer_d.step()
+
+                acc = classification_accuracy(real_class_logits, labels)
+                d_meter.update(float(d_loss.detach().cpu()), batch_size)
+                acc_meter.update(acc, batch_size)
+                d_adv_real_meter.update(d_parts["d_adv_real"], batch_size)
+                d_adv_fake_meter.update(d_parts["d_adv_fake"], batch_size)
+                d_cls_meter.update(d_parts["d_cls"], batch_size)
 
             # Train generator to fool discriminator and produce class-consistent spectra.
-            optimizer_g.zero_grad(set_to_none=True)
-            noise = torch.randn(batch_size, config.noise_dim, device=device)
-            fake_samples = generator(noise, labels)
-            fake_logits, fake_class_logits = discriminator(fake_samples, labels)
-            g_loss, g_parts = generator_loss(
-                fake_logits,
-                fake_class_logits,
-                labels,
-                fake_samples,
-                class_weight=config.class_loss_weight,
-                tv_weight=config.tv_loss_weight,
-                real_target=real_target,
-            )
-            g_loss.backward()
-            optimizer_g.step()
+            for _ in range(max(1, config.generator_steps)):
+                optimizer_g.zero_grad(set_to_none=True)
+                noise = torch.randn(batch_size, config.noise_dim, device=device)
+                fake_samples = generator(noise, labels)
+                fake_logits, fake_class_logits = discriminator(fake_samples, labels)
+                g_loss, g_parts = generator_loss(
+                    fake_logits,
+                    fake_class_logits,
+                    labels,
+                    fake_samples,
+                    class_weight=config.class_loss_weight,
+                    tv_weight=config.tv_loss_weight,
+                    real_target=real_target,
+                )
+                g_loss.backward()
+                optimizer_g.step()
 
-            acc = classification_accuracy(real_class_logits, labels)
-            g_meter.update(float(g_loss.detach().cpu()), batch_size)
-            d_meter.update(float(d_loss.detach().cpu()), batch_size)
-            acc_meter.update(acc, batch_size)
-            g_adv_meter.update(g_parts["g_adv"], batch_size)
-            g_cls_meter.update(g_parts["g_cls"], batch_size)
-            g_tv_meter.update(g_parts["g_tv"], batch_size)
-            d_adv_real_meter.update(d_parts["d_adv_real"], batch_size)
-            d_adv_fake_meter.update(d_parts["d_adv_fake"], batch_size)
-            d_cls_meter.update(d_parts["d_cls"], batch_size)
+                g_meter.update(float(g_loss.detach().cpu()), batch_size)
+                g_adv_meter.update(g_parts["g_adv"], batch_size)
+                g_cls_meter.update(g_parts["g_cls"], batch_size)
+                g_tv_meter.update(g_parts["g_tv"], batch_size)
 
         epoch_log = {
             "epoch": float(epoch),

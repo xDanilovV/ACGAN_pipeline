@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from acgan_pipeline.config import load_config
 from acgan_pipeline.data.dataset import GCIMSDataset
 from acgan_pipeline.data.mea_loader import MeaPreprocessingConfig, PeakCropConfig, load_mea_folder
 from acgan_pipeline.evaluation import run_core_evaluation_suite, stratified_train_test_split
@@ -26,54 +27,81 @@ def load_npz_dataset(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Reusable AC-GAN pipeline for 2D GC-IMS-like data.")
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", type=str, default=None)
+    config_args, remaining = config_parser.parse_known_args()
+    defaults = load_config(config_args.config)
+
+    parser = argparse.ArgumentParser(
+        description="Reusable AC-GAN pipeline for 2D GC-IMS-like data.",
+        parents=[config_parser],
+    )
+    parser.set_defaults(**defaults)
     parser.add_argument("--data", type=str, required=True, help="Path to dataset file consumed by the selected loader.")
-    parser.add_argument("--labels-csv", type=str, default=None, help="Optional CSV labels file for .mea folders. If omitted, labels are inferred from class folders.")
-    parser.add_argument("--mea-label-mode", choices=["class", "culture_type"], default="class")
-    parser.add_argument("--input-format", choices=["npz", "mea"], default="npz")
-    parser.add_argument("--height", type=int, default=128)
-    parser.add_argument("--width", type=int, default=128)
-    parser.add_argument("--resize-mode", choices=["area", "bilinear", "bicubic", "nearest"], default="area")
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--noise-dim", type=int, default=100)
-    parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--class-loss-weight", type=float, default=1.0)
-    parser.add_argument("--tv-loss-weight", type=float, default=1e-4)
-    parser.add_argument("--label-smoothing", type=float, default=0.0)
-    parser.add_argument("--instance-noise-std", type=float, default=0.0)
-    parser.add_argument("--instance-noise-decay-epochs", type=int, default=50)
-    parser.add_argument("--projection-scale", type=float, default=0.1)
-    parser.add_argument("--sample-every", type=int, default=10)
-    parser.add_argument("--checkpoint-every", type=int, default=10)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", type=str, default="outputs")
-    parser.add_argument("--samples-per-class", type=int, default=100)
-    parser.add_argument("--rip-drift-start", type=float, default=None, help="First RIP-relative drift-time value to keep.")
-    parser.add_argument("--rip-drift-stop", type=float, default=None, help="Last RIP-relative drift-time value to keep.")
-    parser.add_argument("--crop-rt-start", type=float, default=None)
-    parser.add_argument("--crop-rt-stop", type=float, default=None)
-    parser.add_argument("--peak-crop", action="store_true", help="Compute a shared peak-aware crop before resizing.")
-    parser.add_argument("--peak-percentile", type=float, default=99.7)
-    parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
-    parser.add_argument("--peak-support-fraction", type=float, default=0.03)
-    parser.add_argument("--peak-margin-rt", type=int, default=256)
-    parser.add_argument("--peak-margin-dt", type=int, default=48)
-    parser.add_argument("--eval-epochs", type=int, default=25)
-    parser.add_argument("--test-fraction", type=float, default=0.2)
-    parser.add_argument("--classifier", choices=["svm", "cnn"], default="svm", help="Downstream evaluation classifier.")
-    parser.add_argument("--generator-checkpoint", type=str, default=None, help="Load a saved generator checkpoint and skip AC-GAN training.")
-    parser.add_argument("--skip-evaluation", action="store_true")
-    parser.add_argument("--skip-visualization", action="store_true")
-    parser.add_argument("--synthetic-viz-denormalized", action="store_true")
-    parser.add_argument("--viz-class-id", type=int, default=0, help="Class id for the real-vs-generated example PNG.")
-    return parser.parse_args()
+    parser.add_argument("--labels-csv", type=str, help="Optional CSV labels file for .mea folders. If omitted, labels are inferred from class folders.")
+    parser.add_argument("--mea-label-mode", choices=["class", "culture_type"])
+    parser.add_argument("--input-format", choices=["npz", "mea"])
+    parser.add_argument("--shape-mode", choices=["auto", "fixed"])
+    parser.add_argument("--height", type=int)
+    parser.add_argument("--width", type=int)
+    parser.add_argument("--auto-max-pixels", type=int)
+    parser.add_argument("--auto-max-height", type=int)
+    parser.add_argument("--auto-max-width", type=int)
+    parser.add_argument("--auto-multiple", type=int)
+    parser.add_argument("--resize-mode", choices=["area", "bilinear", "bicubic", "nearest"])
+    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--noise-dim", type=int)
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--lr-g", type=float)
+    parser.add_argument("--lr-d", type=float)
+    parser.add_argument("--class-loss-weight", type=float)
+    parser.add_argument("--tv-loss-weight", type=float)
+    parser.add_argument("--label-smoothing", type=float)
+    parser.add_argument("--instance-noise-std", type=float)
+    parser.add_argument("--instance-noise-decay-epochs", type=int)
+    parser.add_argument("--projection-scale", type=float)
+    parser.add_argument("--generator-base-channels", type=int)
+    parser.add_argument("--discriminator-base-channels", type=int)
+    parser.add_argument("--discriminator-use-norm", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--no-discriminator-use-norm", action="store_false", default=argparse.SUPPRESS, dest="discriminator_use_norm")
+    parser.add_argument("--generator-steps", type=int)
+    parser.add_argument("--discriminator-update-every", type=int)
+    parser.add_argument("--sample-every", type=int)
+    parser.add_argument("--checkpoint-every", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--output-dir", type=str)
+    parser.add_argument("--samples-per-class", type=int)
+    parser.add_argument("--rip-drift-start", type=float, help="First RIP-relative drift-time value to keep.")
+    parser.add_argument("--rip-drift-stop", type=float, help="Last RIP-relative drift-time value to keep.")
+    parser.add_argument("--crop-rt-start", type=float)
+    parser.add_argument("--crop-rt-stop", type=float)
+    parser.add_argument("--peak-crop", action="store_true", default=argparse.SUPPRESS, help="Compute a shared peak-aware crop before resizing.")
+    parser.add_argument("--no-peak-crop", action="store_false", default=argparse.SUPPRESS, dest="peak_crop")
+    parser.add_argument("--peak-percentile", type=float)
+    parser.add_argument("--peak-relative-threshold", type=float)
+    parser.add_argument("--peak-support-fraction", type=float)
+    parser.add_argument("--peak-margin-rt", type=int)
+    parser.add_argument("--peak-margin-dt", type=int)
+    parser.add_argument("--eval-epochs", type=int)
+    parser.add_argument("--test-fraction", type=float)
+    parser.add_argument("--classifier", choices=["svm", "cnn"], help="Downstream evaluation classifier.")
+    parser.add_argument("--generator-checkpoint", type=str, help="Load a saved generator checkpoint and skip AC-GAN training.")
+    parser.add_argument("--skip-evaluation", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--run-evaluation", action="store_false", default=argparse.SUPPRESS, dest="skip_evaluation")
+    parser.add_argument("--skip-visualization", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--run-visualization", action="store_false", default=argparse.SUPPRESS, dest="skip_visualization")
+    parser.add_argument("--synthetic-viz-denormalized", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--synthetic-viz-normalized", action="store_false", default=argparse.SUPPRESS, dest="synthetic_viz_denormalized")
+    parser.add_argument("--viz-class-id", type=int, help="Class id for the real-vs-generated example PNG.")
+    return parser.parse_args(remaining)
 
 
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    initial_target_shape = _fixed_target_shape(args)
 
     if args.input_format == "mea":
         mea_config = MeaPreprocessingConfig(
@@ -95,7 +123,7 @@ def main() -> None:
             args.labels_csv,
             config=mea_config,
             label_mode=args.mea_label_mode,
-            target_shape=(args.height, args.width),
+            target_shape=initial_target_shape,
             resize_mode=args.resize_mode,
             peak_crop=peak_crop_config,
         )
@@ -108,8 +136,15 @@ def main() -> None:
             keep_drift=_optional_int_range(args.rip_drift_start, args.rip_drift_stop),
         )
         processed_samples, preprocessing_report = preprocess_dataset(raw_samples, preprocessing_config)
+    target_shape = _resolve_target_shape(processed_samples, args, initial_target_shape)
+    preprocessing_report["target_shape"] = list(target_shape)
+    preprocessing_report["shape_mode"] = args.shape_mode
+    preprocessing_report["label_summary"] = _label_summary(labels, preprocessing_report)
     with (output_dir / "preprocessing_report.json").open("w", encoding="utf-8") as f:
         json.dump(preprocessing_report, f, indent=2)
+    with (output_dir / "effective_config.json").open("w", encoding="utf-8") as f:
+        json.dump({**vars(args), "target_shape": list(target_shape)}, f, indent=2)
+    print(f"Using tensor shape {target_shape[0]}x{target_shape[1]} from {args.shape_mode} shape mode")
 
     if not args.skip_visualization:
         export_preprocessing_comparison(
@@ -131,7 +166,7 @@ def main() -> None:
     dataset = GCIMSDataset(
         gan_samples,
         gan_labels,
-        target_shape=(args.height, args.width),
+        target_shape=target_shape,
         resize_mode=args.resize_mode,
     )
     config = TrainConfig(
@@ -139,12 +174,19 @@ def main() -> None:
         batch_size=args.batch_size,
         noise_dim=args.noise_dim,
         lr=args.lr,
+        lr_g=args.lr_g,
+        lr_d=args.lr_d,
         class_loss_weight=args.class_loss_weight,
         tv_loss_weight=args.tv_loss_weight,
         label_smoothing=args.label_smoothing,
         instance_noise_std=args.instance_noise_std,
         instance_noise_decay_epochs=args.instance_noise_decay_epochs,
         projection_scale=args.projection_scale,
+        generator_base_channels=args.generator_base_channels,
+        discriminator_base_channels=args.discriminator_base_channels,
+        discriminator_use_norm=args.discriminator_use_norm,
+        generator_steps=args.generator_steps,
+        discriminator_update_every=args.discriminator_update_every,
         sample_every=args.sample_every,
         checkpoint_every=args.checkpoint_every,
         output_dir=args.output_dir,
@@ -155,14 +197,14 @@ def main() -> None:
             args.generator_checkpoint,
             num_classes=dataset.num_classes,
             noise_dim=args.noise_dim,
-            image_shape=(args.height, args.width),
+            image_shape=target_shape,
         )
         print(f"Loaded generator from {args.generator_checkpoint}")
     else:
         generator, _, _ = train_acgan(
             dataset,
             num_classes=dataset.num_classes,
-            image_shape=(args.height, args.width),
+            image_shape=target_shape,
             config=config,
         )
     synthetic_samples, synthetic_labels = generate_samples(
@@ -215,7 +257,7 @@ def main() -> None:
             real_labels=labels,
             synthetic_samples=synthetic_samples,
             synthetic_labels=synthetic_labels,
-            image_shape=(args.height, args.width),
+            image_shape=target_shape,
             num_epochs=args.eval_epochs,
             output_dir=output_dir / "evaluation",
             classifier_type=args.classifier,
@@ -238,6 +280,99 @@ def main() -> None:
 
 def _denormalize_for_visualization(sample: np.ndarray, min_value: float, max_value: float) -> np.ndarray:
     return ((sample + 1.0) / 2.0) * (max_value - min_value) + min_value
+
+
+def _fixed_target_shape(args: argparse.Namespace) -> tuple[int, int] | None:
+    if args.shape_mode == "fixed":
+        if args.height is None or args.width is None:
+            raise ValueError("fixed shape mode requires both --height and --width")
+        return _validate_model_shape((args.height, args.width))
+    if args.height is not None or args.width is not None:
+        if args.height is None or args.width is None:
+            raise ValueError("manual shape override requires both --height and --width")
+        return _validate_model_shape((args.height, args.width))
+    return None
+
+
+def _resolve_target_shape(
+    samples: np.ndarray,
+    args: argparse.Namespace,
+    fixed_shape: tuple[int, int] | None,
+) -> tuple[int, int]:
+    if fixed_shape is not None:
+        return fixed_shape
+    if samples.ndim not in (3, 4):
+        raise ValueError("expected samples shaped [N, H, W] or [N, 1, H, W]")
+    height, width = samples.shape[-2:]
+    return _auto_target_shape(
+        int(height),
+        int(width),
+        max_pixels=args.auto_max_pixels,
+        max_height=args.auto_max_height,
+        max_width=args.auto_max_width,
+        multiple=args.auto_multiple,
+    )
+
+
+def _auto_target_shape(
+    height: int,
+    width: int,
+    *,
+    max_pixels: int,
+    max_height: int,
+    max_width: int,
+    multiple: int,
+) -> tuple[int, int]:
+    if height <= 0 or width <= 0:
+        raise ValueError("cannot infer tensor shape from an empty spectrum")
+    if multiple <= 0:
+        raise ValueError("auto_multiple must be positive")
+
+    scale = min(
+        1.0,
+        (max_pixels / float(height * width)) ** 0.5,
+        max_height / float(height),
+        max_width / float(width),
+    )
+    target_height = _round_to_multiple(height * scale, multiple)
+    target_width = _round_to_multiple(width * scale, multiple)
+    return _validate_model_shape((target_height, target_width))
+
+
+def _round_to_multiple(value: float, multiple: int) -> int:
+    return max(multiple, int(round(value / multiple)) * multiple)
+
+
+def _validate_model_shape(shape: tuple[int, int]) -> tuple[int, int]:
+    height, width = shape
+    if height % 16 != 0 or width % 16 != 0:
+        raise ValueError(f"tensor shape must be divisible by 16 for the current model, got {height}x{width}")
+    return int(height), int(width)
+
+
+def _label_summary(labels: np.ndarray, preprocessing_report: dict) -> dict[str, object]:
+    labels = np.asarray(labels, dtype=np.int64)
+    counts = {int(label): int(np.sum(labels == label)) for label in np.unique(labels)}
+    metadata = preprocessing_report.get("mea_metadata")
+    mapping: dict[str, int] = {}
+    examples: dict[int, str] = {}
+    if isinstance(metadata, list) and metadata:
+        raw_mapping = metadata[0].get("label_mapping", {})
+        mapping = {str(key): int(value) for key, value in raw_mapping.items()}
+        for item in metadata:
+            label_name = item.get("label")
+            if label_name in mapping:
+                label_id = mapping[str(label_name)]
+                examples.setdefault(label_id, str(item.get("path", "")))
+    inverse = {value: key for key, value in mapping.items()}
+    return {
+        "num_samples": int(len(labels)),
+        "num_classes": int(len(counts)),
+        "counts_by_id": counts,
+        "label_mapping": mapping,
+        "counts_by_name": {inverse.get(label_id, str(label_id)): count for label_id, count in counts.items()},
+        "example_path_by_id": examples,
+    }
 
 
 def _optional_int_range(start: float | None, stop: float | None) -> tuple[int | None, int | None]:
