@@ -152,13 +152,3 @@ The evaluation suite runs:
 Reported metrics include accuracy, balanced accuracy, macro precision/recall/F1,
 weighted F1, per-class precision/recall/F1, support, and confusion matrices.
 
-## Thesis Comparison
-
-The autoencoder pipeline can remain in a separate project. Once both pipelines
-produce metrics, compare:
-
-- classifier improvement from synthetic augmentation
-- real-to-synthetic transfer behavior
-- synthetic-to-real transfer behavior
-- per-class confusion matrix changes
-- visual quality of preprocessed real spectra versus generated spectra
