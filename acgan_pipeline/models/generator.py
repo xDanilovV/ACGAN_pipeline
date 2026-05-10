@@ -60,6 +60,9 @@ class Generator(nn.Module):
         self.output_shape = output_shape
         self.init_shape = (output_shape[0] // 16, output_shape[1] // 16)
         self.label_embedding = nn.Embedding(num_classes, label_embedding_dim)
+        self.register_buffer("class_template_logits", torch.zeros(num_classes, 1, *output_shape))
+        self.register_buffer("class_template_enabled", torch.zeros((), dtype=torch.float32))
+        self.register_buffer("class_template_residual_scale", torch.ones((), dtype=torch.float32))
 
         self.fc = nn.Sequential(
             nn.Linear(noise_dim + label_embedding_dim, base_channels * self.init_shape[0] * self.init_shape[1]),
@@ -81,8 +84,28 @@ class Generator(nn.Module):
             nn.Conv2d(final_channels, final_channels, kernel_size=(1, 5), padding=(0, 2)),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(final_channels, 1, kernel_size=(5, 1), padding=(2, 0)),
-            nn.Tanh(),
         )
+
+    @torch.no_grad()
+    def set_class_templates(self, templates: Tensor, *, residual_scale: float) -> None:
+        """Anchor generation around class-average training spectra.
+
+        Templates are expected in the model output range ``[-1, 1]``. The
+        generator then predicts a residual in logit space, preserving the
+        AC-GAN objective while preventing unconstrained low-frequency blobs.
+        """
+
+        if templates.ndim == 3:
+            templates = templates[:, None]
+        expected = (self.num_classes, 1, *self.output_shape)
+        if tuple(templates.shape) != expected:
+            raise ValueError(f"class templates must have shape {expected}, got {tuple(templates.shape)}")
+
+        templates = templates.to(device=self.class_template_logits.device, dtype=self.class_template_logits.dtype)
+        template_logits = torch.atanh(templates.clamp(-0.999, 0.999))
+        self.class_template_logits.copy_(template_logits)
+        self.class_template_enabled.fill_(1.0)
+        self.class_template_residual_scale.fill_(float(residual_scale))
 
     def forward(self, noise: Tensor, labels: Tensor) -> Tensor:
         label_features = self.label_embedding(labels)
@@ -93,4 +116,9 @@ class Generator(nn.Module):
         for block in self.blocks:
             x = block(x, labels)
 
-        return self.to_spectrum(x)
+        residual_logits = self.to_spectrum(x)
+        if self.class_template_enabled.item() > 0.5:
+            template_logits = self.class_template_logits[labels]
+            residual_scale = self.class_template_residual_scale.to(dtype=residual_logits.dtype)
+            return torch.tanh(template_logits + residual_scale * residual_logits)
+        return torch.tanh(residual_logits)

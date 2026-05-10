@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import random
-import time
 import copy
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +36,8 @@ class TrainConfig:
     generator_peak_threshold: float = 0.65
     generator_peak_temperature: float = 0.05
     generator_border_width: int = 4
+    generator_use_class_templates: bool = False
+    generator_template_residual_scale: float = 0.35
     label_smoothing: float = 0.0
     instance_noise_std: float = 0.0
     instance_noise_decay_epochs: int = 50
@@ -112,6 +114,18 @@ def train_acgan(
     ).to(device)
     generator.apply(_weights_init)
     discriminator.apply(_weights_init)
+    if config.generator_use_class_templates:
+        class_templates, template_counts = _compute_class_templates(dataset, num_classes, image_shape, config, device)
+        generator.set_class_templates(class_templates, residual_scale=config.generator_template_residual_scale)
+        np.savez_compressed(
+            output_dir / "class_templates.npz",
+            templates=class_templates.detach().cpu().numpy()[:, 0],
+            counts=template_counts.detach().cpu().numpy(),
+        )
+        print(
+            "Anchored generator to class templates "
+            f"(residual scale {config.generator_template_residual_scale:.3f})"
+        )
 
     optimizer_g = torch.optim.Adam(generator.parameters(), lr=config.lr_g or config.lr, betas=config.betas)
     optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=config.lr_d or config.lr, betas=config.betas)
@@ -362,7 +376,7 @@ def load_generator_from_checkpoint(
     device = torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     generator = Generator(noise_dim, num_classes, image_shape).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    generator.load_state_dict(checkpoint["generator"])
+    generator.load_state_dict(checkpoint["generator"], strict=False)
     generator.eval()
     return generator
 
@@ -431,6 +445,47 @@ def _save_generated_numpy(generator: Generator, labels: torch.Tensor, noise_dim:
     np.savez_compressed(path, samples=samples[:, 0], labels=labels.cpu().numpy())
     if was_training:
         generator.train()
+
+
+@torch.no_grad()
+def _compute_class_templates(
+    dataset,
+    num_classes: int,
+    image_shape: tuple[int, int],
+    config: TrainConfig,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute class-average tensors in the normalized training space."""
+
+    loader = DataLoader(
+        dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=device.type == "cuda",
+        drop_last=False,
+    )
+    templates = torch.zeros(num_classes, 1, *image_shape, device=device)
+    counts = torch.zeros(num_classes, device=device)
+
+    for samples, labels in loader:
+        samples = samples.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
+        for class_id in range(num_classes):
+            mask = labels == class_id
+            if mask.any():
+                templates[class_id] += samples[mask].sum(dim=0)
+                counts[class_id] += mask.sum()
+
+    total = counts.sum().clamp_min(1.0)
+    global_template = templates.sum(dim=0, keepdim=False) / total
+    for class_id in range(num_classes):
+        if counts[class_id].item() > 0:
+            templates[class_id] /= counts[class_id]
+        else:
+            templates[class_id] = global_template
+
+    return templates.clamp(-1.0, 1.0), counts
 
 
 def _weights_init(module: nn.Module) -> None:

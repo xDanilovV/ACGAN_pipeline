@@ -125,6 +125,11 @@ Important local choices:
 - The generator does not use the discriminator's image shortcut class head for
   its class loss. That prevents the generator from exploiting image-level class
   artifacts instead of producing plausible spectra.
+- The generator can be anchored to per-class real training templates. In this
+  mode, each generated spectrum is a learned residual around the class-average
+  normalized tensor, rather than a fully unconstrained image. This keeps the
+  AC-GAN training objective but adds a domain prior: synthetic spectra should
+  remain near the observed GC-IMS geometry for that class.
 - The generator has a configurable structure penalty that matches real-batch
   intensity, high-intensity peak fraction, and border energy. This is aimed at
   the observed failure mode where synthetic spectra contain random dense blobs
@@ -170,9 +175,10 @@ python -m acgan_pipeline.main \
 ```
 
 The config currently stores the 80-epoch run length, slower discriminator
-learning rate, discriminator update cadence, generator structure penalties, and
-early stopping settings. `epochs` is therefore part of the experiment record,
-not a value that needs to be typed manually for the standard run.
+learning rate, discriminator update cadence, class-template generator anchoring,
+generator structure penalties, and early stopping settings. `epochs` is
+therefore part of the experiment record, not a value that needs to be typed
+manually for the standard run.
 
 After training, evaluate checkpoints if the final model is poor:
 
@@ -212,6 +218,9 @@ generative-model literature already collected for the project:
 - Limited-data conditional GANs are prone to class-conditioning collapse:
   `shahbazi2022collapse`. ReACGAN discusses AC-GAN instability directly
   (`kang2021reacgan`), even though this pipeline keeps the main model as AC-GAN.
+- Feature/structure matching as a stabilizing generator objective follows the
+  same motivation as feature matching in GAN training: do not let the generator
+  optimize only a brittle discriminator signal.
 - Synthetic spectral augmentation has precedent but requires task-specific
   validation: `zhu2020began`, `zhu2023ccgan`, `frischia2020raman`,
   `gracia2023spectroscopy`, `wang2019oracgan`, `li2022acwgangp`.

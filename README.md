@@ -182,6 +182,13 @@ structure penalty that tracks intensity, peak-density, and border-artifact
 matching against real training batches. The best structural checkpoint is saved
 as `checkpoints/best_early_stopping.pt`.
 
+The current generator is also class-template anchored by default. For each
+class, the training code saves a real normalized class mean in
+`class_templates.npz`; the AC-GAN generator learns a residual around that
+template instead of inventing an unconstrained spectrum from scratch. This keeps
+the AC-GAN objective while making visual inspection stricter and easier to
+explain.
+
 ## Documentation
 
 See `docs/technical_pipeline.md` for the preprocessing rationale, AC-GAN design

@@ -69,6 +69,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--generator-peak-threshold", type=float)
     parser.add_argument("--generator-peak-temperature", type=float)
     parser.add_argument("--generator-border-width", type=int)
+    parser.add_argument("--generator-use-class-templates", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--no-generator-use-class-templates", action="store_false", default=argparse.SUPPRESS, dest="generator_use_class_templates")
+    parser.add_argument("--generator-template-residual-scale", type=float)
     parser.add_argument("--label-smoothing", type=float)
     parser.add_argument("--instance-noise-std", type=float)
     parser.add_argument("--instance-noise-decay-epochs", type=int)
@@ -226,6 +229,8 @@ def main() -> None:
         generator_peak_threshold=args.generator_peak_threshold,
         generator_peak_temperature=args.generator_peak_temperature,
         generator_border_width=args.generator_border_width,
+        generator_use_class_templates=args.generator_use_class_templates,
+        generator_template_residual_scale=args.generator_template_residual_scale,
         label_smoothing=args.label_smoothing,
         instance_noise_std=args.instance_noise_std,
         instance_noise_decay_epochs=args.instance_noise_decay_epochs,
