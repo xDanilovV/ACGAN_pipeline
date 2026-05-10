@@ -58,6 +58,10 @@ def main() -> None:
         base_channels=config.discriminator_base_channels,
         projection_scale=0.0,
         use_norm=config.discriminator_use_norm,
+        use_spectral_norm=config.discriminator_use_spectral_norm,
+        pool_shape=(config.discriminator_pool_height, config.discriminator_pool_width),
+        input_pool_shape=(config.discriminator_input_pool_height, config.discriminator_input_pool_width),
+        dropout=config.discriminator_dropout,
     ).to(device)
     model.apply(_weights_init)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

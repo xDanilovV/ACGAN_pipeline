@@ -35,6 +35,12 @@ class TrainConfig:
     generator_base_channels: int = 256
     discriminator_base_channels: int = 32
     discriminator_use_norm: bool = False
+    discriminator_use_spectral_norm: bool = False
+    discriminator_pool_shape: tuple[int, int] = (8, 4)
+    discriminator_input_pool_shape: tuple[int, int] = (32, 8)
+    discriminator_dropout: float = 0.1
+    pretrain_classifier_epochs: int = 0
+    pretrain_classifier_lr: float = 1e-3
     generator_steps: int = 1
     discriminator_update_every: int = 1
     sample_every: int = 10
@@ -84,6 +90,10 @@ def train_acgan(
         base_channels=config.discriminator_base_channels,
         projection_scale=config.projection_scale,
         use_norm=config.discriminator_use_norm,
+        use_spectral_norm=config.discriminator_use_spectral_norm,
+        pool_shape=config.discriminator_pool_shape,
+        input_pool_shape=config.discriminator_input_pool_shape,
+        dropout=config.discriminator_dropout,
     ).to(device)
     generator.apply(_weights_init)
     discriminator.apply(_weights_init)
@@ -95,6 +105,10 @@ def train_acgan(
     fixed_labels = torch.arange(num_classes, device=device)
     best_cls_acc = -1.0
     started_at = time.perf_counter()
+
+    if config.pretrain_classifier_epochs > 0:
+        pretrain_history = pretrain_discriminator_classifier(discriminator, dataloader, config, device)
+        _save_history(pretrain_history, output_dir / "classifier_pretrain_history.json")
 
     for epoch in range(1, config.num_epochs + 1):
         epoch_started_at = time.perf_counter()
@@ -270,6 +284,51 @@ def load_generator_from_checkpoint(
     generator.load_state_dict(checkpoint["generator"])
     generator.eval()
     return generator
+
+
+def pretrain_discriminator_classifier(
+    discriminator: Discriminator,
+    dataloader: DataLoader,
+    config: TrainConfig,
+    device: torch.device,
+) -> list[dict[str, float]]:
+    """Pretrain the AC-GAN discriminator auxiliary classifier on real spectra."""
+
+    optimizer = torch.optim.AdamW(
+        discriminator.parameters(),
+        lr=config.pretrain_classifier_lr,
+        weight_decay=1e-4,
+    )
+    history: list[dict[str, float]] = []
+    for epoch in range(1, config.pretrain_classifier_epochs + 1):
+        discriminator.train()
+        loss_meter = AverageMeter()
+        acc_meter = AverageMeter()
+        started_at = time.perf_counter()
+        for real_samples, labels in dataloader:
+            real_samples = real_samples.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
+            _, class_logits = discriminator(real_samples)
+            loss = nn.functional.cross_entropy(class_logits, labels)
+            loss.backward()
+            optimizer.step()
+            loss_meter.update(float(loss.detach().cpu()), len(labels))
+            acc_meter.update(classification_accuracy(class_logits, labels), len(labels))
+
+        row = {
+            "epoch": float(epoch),
+            "classifier_loss": loss_meter.average,
+            "classification_accuracy": acc_meter.average,
+            "seconds": time.perf_counter() - started_at,
+        }
+        history.append(row)
+        print(
+            f"Pretrain {epoch:03d}/{config.pretrain_classifier_epochs} | "
+            f"Cls loss: {loss_meter.average:.4f} | "
+            f"Cls acc: {acc_meter.average:.4f}"
+        )
+    return history
 
 
 def _save_history(history: list[dict[str, float]], path: Path, total_seconds: float | None = None) -> None:

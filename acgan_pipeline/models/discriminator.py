@@ -9,15 +9,32 @@ def _sn(module: nn.Module) -> nn.Module:
     return nn.utils.spectral_norm(module)
 
 
+def _maybe_sn(module: nn.Module, enabled: bool) -> nn.Module:
+    return _sn(module) if enabled else module
+
+
 class AsymmetricDownsampleBlock(nn.Module):
     """CNN block with separate horizontal/vertical receptive fields."""
 
-    def __init__(self, in_channels: int, out_channels: int, use_norm: bool = True) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        use_norm: bool = True,
+        use_spectral_norm: bool = False,
+    ) -> None:
         super().__init__()
         layers: list[nn.Module] = [
-            _sn(nn.Conv2d(in_channels, out_channels, kernel_size=(1, 5), stride=(1, 2), padding=(0, 2))),
+            _maybe_sn(
+                nn.Conv2d(in_channels, out_channels, kernel_size=(1, 5), stride=(1, 2), padding=(0, 2)),
+                use_spectral_norm,
+            ),
             nn.LeakyReLU(0.2, inplace=True),
-            _sn(nn.Conv2d(out_channels, out_channels, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0))),
+            _maybe_sn(
+                nn.Conv2d(out_channels, out_channels, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0)),
+                use_spectral_norm,
+            ),
             nn.LeakyReLU(0.2, inplace=True),
         ]
         if use_norm:
@@ -39,6 +56,10 @@ class Discriminator(nn.Module):
         base_channels: int = 32,
         projection_scale: float = 0.1,
         use_norm: bool = False,
+        use_spectral_norm: bool = False,
+        pool_shape: tuple[int, int] = (8, 4),
+        input_pool_shape: tuple[int, int] = (32, 8),
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
         if input_shape[0] % 16 != 0 or input_shape[1] % 16 != 0:
@@ -46,29 +67,56 @@ class Discriminator(nn.Module):
 
         self.num_classes = num_classes
         self.projection_scale = projection_scale
+        self.pool_shape = pool_shape
+        self.input_pool_shape = input_pool_shape
 
         self.features = nn.Sequential(
-            AsymmetricDownsampleBlock(1, base_channels, use_norm=False),
-            AsymmetricDownsampleBlock(base_channels, base_channels * 2, use_norm=use_norm),
-            AsymmetricDownsampleBlock(base_channels * 2, base_channels * 4, use_norm=use_norm),
-            AsymmetricDownsampleBlock(base_channels * 4, base_channels * 8, use_norm=use_norm),
+            AsymmetricDownsampleBlock(1, base_channels, use_norm=False, use_spectral_norm=use_spectral_norm),
+            AsymmetricDownsampleBlock(
+                base_channels,
+                base_channels * 2,
+                use_norm=use_norm,
+                use_spectral_norm=use_spectral_norm,
+            ),
+            AsymmetricDownsampleBlock(
+                base_channels * 2,
+                base_channels * 4,
+                use_norm=use_norm,
+                use_spectral_norm=use_spectral_norm,
+            ),
+            AsymmetricDownsampleBlock(
+                base_channels * 4,
+                base_channels * 8,
+                use_norm=use_norm,
+                use_spectral_norm=use_spectral_norm,
+            ),
         )
 
-        self.pool = nn.AdaptiveAvgPool2d((4, 4))
-        flattened = base_channels * 8 * 4 * 4
+        self.avg_pool = nn.AdaptiveAvgPool2d(pool_shape)
+        self.max_pool = nn.AdaptiveMaxPool2d(pool_shape)
+        self.input_avg_pool = nn.AdaptiveAvgPool2d(input_pool_shape)
+        self.input_max_pool = nn.AdaptiveMaxPool2d(input_pool_shape)
+        flattened = (
+            base_channels * 8 * pool_shape[0] * pool_shape[1] * 2
+            + input_pool_shape[0] * input_pool_shape[1] * 2
+        )
         self.shared = nn.Sequential(
             nn.Flatten(),
-            _sn(nn.Linear(flattened, 512)),
+            _maybe_sn(nn.Linear(flattened, 512), use_spectral_norm),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
+            nn.Dropout(dropout),
         )
-        self.real_fake_head = _sn(nn.Linear(512, 1))
+        self.real_fake_head = _maybe_sn(nn.Linear(512, 1), use_spectral_norm)
         self.projection = nn.Embedding(num_classes, 512)
-        self.class_head = _sn(nn.Linear(512, num_classes))
+        self.class_head = _maybe_sn(nn.Linear(512, num_classes), use_spectral_norm)
 
     def forward(self, x: Tensor, labels: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        features = self.features(x)
-        shared = self.shared(self.pool(features))
+        x_features = x.add(1.0).mul(0.5).clamp(0.0, 1.0)
+        features = self.features(x_features)
+        feature_pooled = torch.cat([self.avg_pool(features), self.max_pool(features)], dim=1).flatten(1)
+        input_pooled = torch.cat([self.input_avg_pool(x_features), self.input_max_pool(x_features)], dim=1).flatten(1)
+        pooled = torch.cat([feature_pooled, input_pooled], dim=1)
+        shared = self.shared(pooled)
         real_fake_logits = self.real_fake_head(shared).squeeze(1)
         if labels is not None and self.projection_scale > 0:
             projected = torch.sum(

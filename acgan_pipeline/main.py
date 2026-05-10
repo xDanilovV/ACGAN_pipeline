@@ -65,6 +65,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discriminator-base-channels", type=int)
     parser.add_argument("--discriminator-use-norm", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument("--no-discriminator-use-norm", action="store_false", default=argparse.SUPPRESS, dest="discriminator_use_norm")
+    parser.add_argument("--discriminator-use-spectral-norm", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--no-discriminator-use-spectral-norm", action="store_false", default=argparse.SUPPRESS, dest="discriminator_use_spectral_norm")
+    parser.add_argument("--discriminator-pool-height", type=int)
+    parser.add_argument("--discriminator-pool-width", type=int)
+    parser.add_argument("--discriminator-input-pool-height", type=int)
+    parser.add_argument("--discriminator-input-pool-width", type=int)
+    parser.add_argument("--discriminator-dropout", type=float)
+    parser.add_argument("--pretrain-classifier-epochs", type=int)
+    parser.add_argument("--pretrain-classifier-lr", type=float)
     parser.add_argument("--generator-steps", type=int)
     parser.add_argument("--discriminator-update-every", type=int)
     parser.add_argument("--sample-every", type=int)
@@ -185,6 +194,12 @@ def main() -> None:
         generator_base_channels=args.generator_base_channels,
         discriminator_base_channels=args.discriminator_base_channels,
         discriminator_use_norm=args.discriminator_use_norm,
+        discriminator_use_spectral_norm=args.discriminator_use_spectral_norm,
+        discriminator_pool_shape=(args.discriminator_pool_height, args.discriminator_pool_width),
+        discriminator_input_pool_shape=(args.discriminator_input_pool_height, args.discriminator_input_pool_width),
+        discriminator_dropout=args.discriminator_dropout,
+        pretrain_classifier_epochs=args.pretrain_classifier_epochs,
+        pretrain_classifier_lr=args.pretrain_classifier_lr,
         generator_steps=args.generator_steps,
         discriminator_update_every=args.discriminator_update_every,
         sample_every=args.sample_every,
