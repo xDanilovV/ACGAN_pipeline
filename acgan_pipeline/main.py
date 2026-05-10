@@ -101,6 +101,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--early-stopping-metric", type=str)
     parser.add_argument("--early-stopping-mode", choices=["min", "max"])
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--split-seed", type=int, help="Seed for the fixed real train/test split. Defaults to --seed if unset.")
+    parser.add_argument("--eval-seed", type=int, help="Seed for downstream evaluation classifiers. Defaults to --seed if unset.")
     parser.add_argument("--output-dir", type=str)
     parser.add_argument("--samples-per-class", type=int)
     parser.add_argument("--rip-drift-start", type=float, help="First RIP-relative drift-time value to keep.")
@@ -137,6 +139,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    split_seed = args.seed if args.split_seed is None else args.split_seed
+    eval_seed = args.seed if args.eval_seed is None else args.eval_seed
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     initial_target_shape = _fixed_target_shape(args)
@@ -187,7 +191,11 @@ def main() -> None:
     with (output_dir / "preprocessing_report.json").open("w", encoding="utf-8") as f:
         json.dump(preprocessing_report, f, indent=2)
     with (output_dir / "effective_config.json").open("w", encoding="utf-8") as f:
-        json.dump({**vars(args), "target_shape": list(target_shape)}, f, indent=2)
+        json.dump(
+            {**vars(args), "split_seed": split_seed, "eval_seed": eval_seed, "target_shape": list(target_shape)},
+            f,
+            indent=2,
+        )
     print(f"Using tensor shape {target_shape[0]}x{target_shape[1]} from {args.shape_mode} shape mode")
 
     if not args.skip_visualization:
@@ -203,7 +211,7 @@ def main() -> None:
     gan_samples = processed_samples
     gan_labels = labels
     if not args.skip_evaluation:
-        train_indices, test_indices = stratified_train_test_split(labels, args.test_fraction, args.seed)
+        train_indices, test_indices = stratified_train_test_split(labels, args.test_fraction, split_seed)
         gan_samples = processed_samples[train_indices]
         gan_labels = labels[train_indices]
 
@@ -353,7 +361,7 @@ def main() -> None:
             num_epochs=args.eval_epochs,
             output_dir=output_dir / "evaluation",
             classifier_type=args.classifier,
-            seed=args.seed,
+            seed=eval_seed,
             normalization_min=dataset.min_value,
             normalization_max=dataset.max_value,
             test_fraction=args.test_fraction,
