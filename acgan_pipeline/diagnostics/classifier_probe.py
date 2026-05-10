@@ -62,6 +62,7 @@ def main() -> None:
         pool_shape=(config.discriminator_pool_height, config.discriminator_pool_width),
         input_pool_shape=(config.discriminator_input_pool_height, config.discriminator_input_pool_width),
         dropout=config.discriminator_dropout,
+        class_image_head_scale=config.discriminator_class_image_head_scale,
     ).to(device)
     model.apply(_weights_init)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

@@ -72,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discriminator-input-pool-height", type=int)
     parser.add_argument("--discriminator-input-pool-width", type=int)
     parser.add_argument("--discriminator-dropout", type=float)
+    parser.add_argument("--discriminator-class-image-head-scale", type=float)
     parser.add_argument("--pretrain-classifier-epochs", type=int)
     parser.add_argument("--pretrain-classifier-lr", type=float)
     parser.add_argument("--generator-steps", type=int)
@@ -198,6 +199,7 @@ def main() -> None:
         discriminator_pool_shape=(args.discriminator_pool_height, args.discriminator_pool_width),
         discriminator_input_pool_shape=(args.discriminator_input_pool_height, args.discriminator_input_pool_width),
         discriminator_dropout=args.discriminator_dropout,
+        discriminator_class_image_head_scale=args.discriminator_class_image_head_scale,
         pretrain_classifier_epochs=args.pretrain_classifier_epochs,
         pretrain_classifier_lr=args.pretrain_classifier_lr,
         generator_steps=args.generator_steps,

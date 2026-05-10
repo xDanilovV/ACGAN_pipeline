@@ -38,6 +38,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "discriminator_input_pool_height": 32,
     "discriminator_input_pool_width": 8,
     "discriminator_dropout": 0.0,
+    "discriminator_class_image_head_scale": 1.0,
     "pretrain_classifier_epochs": 30,
     "pretrain_classifier_lr": 1e-3,
     "generator_steps": 1,

@@ -60,6 +60,7 @@ class Discriminator(nn.Module):
         pool_shape: tuple[int, int] = (8, 4),
         input_pool_shape: tuple[int, int] = (32, 8),
         dropout: float = 0.1,
+        class_image_head_scale: float = 1.0,
     ) -> None:
         super().__init__()
         if input_shape[0] % 16 != 0 or input_shape[1] % 16 != 0:
@@ -69,6 +70,7 @@ class Discriminator(nn.Module):
         self.projection_scale = projection_scale
         self.pool_shape = pool_shape
         self.input_pool_shape = input_pool_shape
+        self.class_image_head_scale = class_image_head_scale
 
         self.features = nn.Sequential(
             AsymmetricDownsampleBlock(1, base_channels, use_norm=False, use_spectral_norm=use_spectral_norm),
@@ -109,6 +111,7 @@ class Discriminator(nn.Module):
         self.real_fake_head = _maybe_sn(nn.Linear(512, 1), use_spectral_norm)
         self.projection = nn.Embedding(num_classes, 512)
         self.class_head = _maybe_sn(nn.Linear(512, num_classes), use_spectral_norm)
+        self.class_image_head = nn.Linear(input_shape[0] * input_shape[1], num_classes)
 
     def forward(self, x: Tensor, labels: Tensor | None = None) -> tuple[Tensor, Tensor]:
         x_features = x.add(1.0).mul(0.5).clamp(0.0, 1.0)
@@ -125,4 +128,15 @@ class Discriminator(nn.Module):
             )
             real_fake_logits = real_fake_logits + self.projection_scale * projected
         class_logits = self.class_head(shared)
+        if self.class_image_head_scale > 0:
+            class_pixels = _samplewise_standardize(x_features).flatten(1)
+            class_logits = class_logits + self.class_image_head_scale * self.class_image_head(class_pixels)
         return real_fake_logits, class_logits
+
+
+def _samplewise_standardize(x: Tensor) -> Tensor:
+    """Preserve absolute peak positions while normalizing per-spectrum contrast."""
+
+    mean = x.mean(dim=(2, 3), keepdim=True)
+    std = x.std(dim=(2, 3), keepdim=True).clamp_min(1e-6)
+    return (x - mean) / std

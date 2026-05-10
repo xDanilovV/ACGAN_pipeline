@@ -39,6 +39,7 @@ class TrainConfig:
     discriminator_pool_shape: tuple[int, int] = (8, 4)
     discriminator_input_pool_shape: tuple[int, int] = (32, 8)
     discriminator_dropout: float = 0.1
+    discriminator_class_image_head_scale: float = 1.0
     pretrain_classifier_epochs: int = 0
     pretrain_classifier_lr: float = 1e-3
     generator_steps: int = 1
@@ -94,6 +95,7 @@ def train_acgan(
         pool_shape=config.discriminator_pool_shape,
         input_pool_shape=config.discriminator_input_pool_shape,
         dropout=config.discriminator_dropout,
+        class_image_head_scale=config.discriminator_class_image_head_scale,
     ).to(device)
     generator.apply(_weights_init)
     discriminator.apply(_weights_init)
@@ -355,7 +357,10 @@ def _save_generated_numpy(generator: Generator, labels: torch.Tensor, noise_dim:
 def _weights_init(module: nn.Module) -> None:
     if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
         weight = getattr(module, "weight_orig", module.weight)
-        nn.init.normal_(weight, mean=0.0, std=0.02)
+        if isinstance(module, nn.Linear) and module.in_features > 4096 and module.out_features <= 128:
+            nn.init.xavier_uniform_(weight)
+        else:
+            nn.init.normal_(weight, mean=0.0, std=0.02)
         if module.bias is not None:
             nn.init.zeros_(module.bias)
     elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
