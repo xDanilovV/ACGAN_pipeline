@@ -44,6 +44,7 @@ def load_experiment_inputs(config_path: str | None, data_path: str) -> tuple[np.
             intensity_clip_low_percentile=args.intensity_clip_low_percentile,
             intensity_clip_high_percentile=args.intensity_clip_high_percentile,
             intensity_log1p=args.intensity_log1p,
+            intensity_percentile_max_pixels=args.intensity_percentile_max_pixels,
         )
         peak_crop_config = PeakCropConfig(
             enabled=args.peak_crop,
@@ -52,6 +53,7 @@ def load_experiment_inputs(config_path: str | None, data_path: str) -> tuple[np.
             support_fraction=args.peak_support_fraction,
             margin_rt=args.peak_margin_rt,
             margin_dt=args.peak_margin_dt,
+            percentile_max_pixels=args.peak_percentile_max_pixels,
         )
         samples, labels, metadata = load_mea_folder(
             data_path,

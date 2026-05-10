@@ -98,6 +98,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--intensity-clip-high-percentile", type=float, help="Optional per-spectrum high percentile clipping after baseline subtraction.")
     parser.add_argument("--intensity-log1p", action="store_true", default=argparse.SUPPRESS, help="Apply log1p compression after baseline subtraction/clipping.")
     parser.add_argument("--no-intensity-log1p", action="store_false", default=argparse.SUPPRESS, dest="intensity_log1p")
+    parser.add_argument("--intensity-percentile-max-pixels", type=int, help="Maximum pixels sampled for approximate per-spectrum intensity percentiles.")
     parser.add_argument("--peak-crop", action="store_true", default=argparse.SUPPRESS, help="Compute a shared peak-aware crop before resizing.")
     parser.add_argument("--no-peak-crop", action="store_false", default=argparse.SUPPRESS, dest="peak_crop")
     parser.add_argument("--peak-percentile", type=float)
@@ -105,6 +106,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--peak-support-fraction", type=float)
     parser.add_argument("--peak-margin-rt", type=int)
     parser.add_argument("--peak-margin-dt", type=int)
+    parser.add_argument("--peak-percentile-max-pixels", type=int, help="Maximum pixels sampled for approximate peak-crop percentile thresholds.")
     parser.add_argument("--eval-epochs", type=int)
     parser.add_argument("--test-fraction", type=float)
     parser.add_argument("--classifier", choices=["svm", "cnn"], help="Downstream evaluation classifier.")
@@ -135,6 +137,7 @@ def main() -> None:
             intensity_clip_low_percentile=args.intensity_clip_low_percentile,
             intensity_clip_high_percentile=args.intensity_clip_high_percentile,
             intensity_log1p=args.intensity_log1p,
+            intensity_percentile_max_pixels=args.intensity_percentile_max_pixels,
         )
         peak_crop_config = PeakCropConfig(
             enabled=args.peak_crop,
@@ -143,6 +146,7 @@ def main() -> None:
             support_fraction=args.peak_support_fraction,
             margin_rt=args.peak_margin_rt,
             margin_dt=args.peak_margin_dt,
+            percentile_max_pixels=args.peak_percentile_max_pixels,
         )
         processed_samples, labels, mea_metadata = load_mea_folder(
             args.data,
@@ -343,6 +347,7 @@ def _raw_visualization_sample(args: argparse.Namespace, report: dict, index: int
                 intensity_clip_low_percentile=None,
                 intensity_clip_high_percentile=None,
                 intensity_log1p=False,
+                intensity_percentile_max_pixels=args.intensity_percentile_max_pixels,
             ),
         )
         return values

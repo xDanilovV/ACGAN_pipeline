@@ -29,6 +29,7 @@ class MeaPreprocessingConfig:
     intensity_clip_low_percentile: float | None = None
     intensity_clip_high_percentile: float | None = None
     intensity_log1p: bool = False
+    intensity_percentile_max_pixels: int = 250_000
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class PeakCropConfig:
     support_fraction: float = 0.03
     margin_rt: int = 256
     margin_dt: int = 48
+    percentile_max_pixels: int = 250_000
 
 
 def load_mea_folder(
@@ -169,7 +171,7 @@ def compute_shared_peak_crop(
         values, _ = load_mea_file(path, config=config)
         processed_shapes.append(list(values.shape))
         threshold = max(
-            float(np.percentile(values, crop_config.percentile)),
+            float(_fast_percentile(values, crop_config.percentile, crop_config.percentile_max_pixels)),
             float(np.max(values)) * crop_config.relative_threshold,
         )
         mask = values >= threshold
@@ -290,7 +292,11 @@ def _apply_index_crop(values: np.ndarray, crop: tuple[int, int, int, int]) -> np
 def _transform_intensity(values: np.ndarray, config: MeaPreprocessingConfig) -> np.ndarray:
     transformed = np.asarray(values, dtype=np.float32)
     if config.intensity_baseline_percentile is not None:
-        baseline = np.percentile(transformed, config.intensity_baseline_percentile)
+        baseline = _fast_percentile(
+            transformed,
+            config.intensity_baseline_percentile,
+            config.intensity_percentile_max_pixels,
+        )
         transformed = transformed - np.float32(baseline)
 
     if config.intensity_log1p or config.intensity_baseline_percentile is not None:
@@ -300,15 +306,31 @@ def _transform_intensity(values: np.ndarray, config: MeaPreprocessingConfig) -> 
         clip_min = None
         clip_max = None
         if config.intensity_clip_low_percentile is not None:
-            clip_min = np.percentile(transformed, config.intensity_clip_low_percentile)
+            clip_min = _fast_percentile(
+                transformed,
+                config.intensity_clip_low_percentile,
+                config.intensity_percentile_max_pixels,
+            )
         if config.intensity_clip_high_percentile is not None:
-            clip_max = np.percentile(transformed, config.intensity_clip_high_percentile)
+            clip_max = _fast_percentile(
+                transformed,
+                config.intensity_clip_high_percentile,
+                config.intensity_percentile_max_pixels,
+            )
         transformed = np.clip(transformed, clip_min, clip_max)
 
     if config.intensity_log1p:
         transformed = np.log1p(np.maximum(transformed, 0.0))
 
     return transformed.astype(np.float32, copy=False)
+
+
+def _fast_percentile(values: np.ndarray, percentile: float, max_pixels: int) -> float:
+    flat = np.ravel(values)
+    if max_pixels > 0 and flat.size > max_pixels:
+        stride = int(np.ceil(flat.size / max_pixels))
+        flat = flat[::stride]
+    return float(np.percentile(flat, percentile))
 
 
 def _import_gcims():

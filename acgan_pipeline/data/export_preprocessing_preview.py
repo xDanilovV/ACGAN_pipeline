@@ -30,12 +30,14 @@ def main() -> None:
     parser.add_argument("--intensity-clip-low-percentile", type=float, default=None)
     parser.add_argument("--intensity-clip-high-percentile", type=float, default=99.8)
     parser.add_argument("--intensity-log1p", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--intensity-percentile-max-pixels", type=int, default=250_000)
     parser.add_argument("--peak-crop", action="store_true")
     parser.add_argument("--peak-percentile", type=float, default=99.7)
     parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
     parser.add_argument("--peak-support-fraction", type=float, default=0.03)
     parser.add_argument("--peak-margin-rt", type=int, default=256)
     parser.add_argument("--peak-margin-dt", type=int, default=48)
+    parser.add_argument("--peak-percentile-max-pixels", type=int, default=250_000)
     args = parser.parse_args()
 
     root = Path(args.data)
@@ -51,6 +53,7 @@ def main() -> None:
         intensity_clip_low_percentile=args.intensity_clip_low_percentile,
         intensity_clip_high_percentile=args.intensity_clip_high_percentile,
         intensity_log1p=args.intensity_log1p,
+        intensity_percentile_max_pixels=args.intensity_percentile_max_pixels,
     )
     values, _ = load_mea_file(
         path,
@@ -67,6 +70,7 @@ def main() -> None:
                 support_fraction=args.peak_support_fraction,
                 margin_rt=args.peak_margin_rt,
                 margin_dt=args.peak_margin_dt,
+                percentile_max_pixels=args.peak_percentile_max_pixels,
             ),
         )
         values = _apply_index_crop(values, shared_crop)
