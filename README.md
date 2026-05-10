@@ -68,11 +68,7 @@ source .venv/bin/activate
 python -m acgan_pipeline.main \
   --config configs/acgan_balanced_peakcrop.json \
   --data ~/ACGAN_pipeline/data_fermentation \
-  --output-dir out_acgan \
-  --epochs 80 \
-  --lr-d 0.00005 \
-  --discriminator-update-every 2 \
-  --classifier svm
+  --output-dir out_acgan
 ```
 
 The config defaults keep `shape_mode` set to `auto`, so normal runs should not
@@ -150,7 +146,8 @@ Each run writes to the selected output directory:
 - `evaluation/*_confusion_matrix.png`
 
 The preprocessing examples include a raw/processed/synthetic triplet for visual
-inspection.
+inspection plus `real_tensor_vs_generated_class_*.png`, which compares the real
+training tensor and generated tensor at the exact same model resolution.
 
 ## Evaluation
 
@@ -179,6 +176,11 @@ PY
 
 GAN checkpoints can differ sharply. When training is unstable, evaluate saved
 checkpoints rather than assuming the final epoch is best.
+
+The balanced config also enables early stopping on `g_structure`, a generator
+structure penalty that tracks intensity, peak-density, and border-artifact
+matching against real training batches. The best structural checkpoint is saved
+as `checkpoints/best_early_stopping.pt`.
 
 ## Documentation
 

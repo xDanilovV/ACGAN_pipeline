@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 import time
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,12 @@ class TrainConfig:
     class_loss_weight: float = 1.0
     discriminator_fake_class_weight: float = 0.0
     tv_loss_weight: float = 1e-4
+    generator_intensity_match_weight: float = 2.0
+    generator_peak_density_weight: float = 8.0
+    generator_border_weight: float = 2.0
+    generator_peak_threshold: float = 0.65
+    generator_peak_temperature: float = 0.05
+    generator_border_width: int = 4
     label_smoothing: float = 0.0
     instance_noise_std: float = 0.0
     instance_noise_decay_epochs: int = 50
@@ -48,6 +55,10 @@ class TrainConfig:
     discriminator_update_every: int = 1
     sample_every: int = 10
     checkpoint_every: int = 10
+    early_stopping_patience: int = 0
+    early_stopping_min_delta: float = 0.0
+    early_stopping_metric: str = "g_structure"
+    early_stopping_mode: str = "min"
     output_dir: str = "outputs"
     num_workers: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -108,6 +119,11 @@ def train_acgan(
     history: list[dict[str, float]] = []
     fixed_labels = torch.arange(num_classes, device=device)
     best_cls_acc = -1.0
+    best_early_value: float | None = None
+    best_early_epoch = 0
+    epochs_without_improvement = 0
+    best_early_generator_state: dict[str, torch.Tensor] | None = None
+    best_early_discriminator_state: dict[str, torch.Tensor] | None = None
     started_at = time.perf_counter()
 
     if config.pretrain_classifier_epochs > 0:
@@ -122,6 +138,10 @@ def train_acgan(
         g_adv_meter = AverageMeter()
         g_cls_meter = AverageMeter()
         g_tv_meter = AverageMeter()
+        g_intensity_meter = AverageMeter()
+        g_peak_density_meter = AverageMeter()
+        g_border_meter = AverageMeter()
+        g_structure_meter = AverageMeter()
         d_adv_real_meter = AverageMeter()
         d_adv_fake_meter = AverageMeter()
         d_cls_meter = AverageMeter()
@@ -181,8 +201,15 @@ def train_acgan(
                     fake_class_logits,
                     labels,
                     fake_samples,
+                    real_samples=real_samples,
                     class_weight=config.class_loss_weight,
                     tv_weight=config.tv_loss_weight,
+                    intensity_match_weight=config.generator_intensity_match_weight,
+                    peak_density_weight=config.generator_peak_density_weight,
+                    border_weight=config.generator_border_weight,
+                    peak_threshold=config.generator_peak_threshold,
+                    peak_temperature=config.generator_peak_temperature,
+                    border_width=config.generator_border_width,
                     real_target=real_target,
                 )
                 g_loss.backward()
@@ -192,6 +219,10 @@ def train_acgan(
                 g_adv_meter.update(g_parts["g_adv"], batch_size)
                 g_cls_meter.update(g_parts["g_cls"], batch_size)
                 g_tv_meter.update(g_parts["g_tv"], batch_size)
+                g_intensity_meter.update(g_parts["g_intensity_match"], batch_size)
+                g_peak_density_meter.update(g_parts["g_peak_density"], batch_size)
+                g_border_meter.update(g_parts["g_border"], batch_size)
+                g_structure_meter.update(g_parts["g_structure"], batch_size)
 
         epoch_log = {
             "epoch": float(epoch),
@@ -200,6 +231,10 @@ def train_acgan(
             "g_adv": g_adv_meter.average,
             "g_cls": g_cls_meter.average,
             "g_tv": g_tv_meter.average,
+            "g_intensity_match": g_intensity_meter.average,
+            "g_peak_density": g_peak_density_meter.average,
+            "g_border": g_border_meter.average,
+            "g_structure": g_structure_meter.average,
             "d_adv_real": d_adv_real_meter.average,
             "d_adv_fake": d_adv_fake_meter.average,
             "d_cls": d_cls_meter.average,
@@ -226,6 +261,38 @@ def train_acgan(
         if acc_meter.average > best_cls_acc:
             best_cls_acc = acc_meter.average
             save_checkpoint(generator, discriminator, optimizer_g, optimizer_d, epoch, checkpoint_dir / "best_discriminator_cls.pt")
+
+        if config.early_stopping_patience > 0:
+            metric_value = epoch_log.get(config.early_stopping_metric)
+            if metric_value is None:
+                raise ValueError(f"unknown early stopping metric: {config.early_stopping_metric}")
+            if _is_improved(
+                metric_value,
+                best_early_value,
+                mode=config.early_stopping_mode,
+                min_delta=config.early_stopping_min_delta,
+            ):
+                best_early_value = float(metric_value)
+                best_early_epoch = epoch
+                epochs_without_improvement = 0
+                best_early_generator_state = copy.deepcopy(generator.state_dict())
+                best_early_discriminator_state = copy.deepcopy(discriminator.state_dict())
+                save_checkpoint(generator, discriminator, optimizer_g, optimizer_d, epoch, checkpoint_dir / "best_early_stopping.pt")
+            else:
+                epochs_without_improvement += 1
+                if epochs_without_improvement >= config.early_stopping_patience:
+                    print(
+                        "Early stopping at epoch "
+                        f"{epoch:03d}; best {config.early_stopping_metric}="
+                        f"{best_early_value:.6f} at epoch {best_early_epoch:03d}"
+                    )
+                    break
+
+    if config.early_stopping_patience > 0 and best_early_generator_state is not None:
+        generator.load_state_dict(best_early_generator_state)
+        if best_early_discriminator_state is not None:
+            discriminator.load_state_dict(best_early_discriminator_state)
+        print(f"Restored best early-stopping generator from epoch {best_early_epoch:03d}")
 
     _save_history(history, output_dir / "training_history.json", total_seconds=time.perf_counter() - started_at)
     return generator, discriminator, history
@@ -403,3 +470,13 @@ def _add_instance_noise(samples: torch.Tensor, std: float) -> torch.Tensor:
     if std <= 0:
         return samples
     return (samples + torch.randn_like(samples) * std).clamp(-1.0, 1.0)
+
+
+def _is_improved(value: float, best: float | None, *, mode: str, min_delta: float) -> bool:
+    if best is None:
+        return True
+    if mode == "min":
+        return value < best - min_delta
+    if mode == "max":
+        return value > best + min_delta
+    raise ValueError(f"early_stopping_mode must be 'min' or 'max', got {mode!r}")

@@ -131,6 +131,50 @@ def export_real_vs_generated_comparison(
     return path
 
 
+def export_real_tensor_vs_generated_comparison(
+    real_tensor: np.ndarray,
+    generated_tensor: np.ndarray,
+    path: str | Path,
+    *,
+    class_name: str,
+) -> Path:
+    """Compare real and generated spectra at the exact GAN tensor resolution."""
+
+    ims = _import_gcims()
+    import matplotlib.pyplot as plt
+
+    real_tensor = np.asarray(real_tensor, dtype=np.float32)
+    generated_tensor = np.asarray(generated_tensor, dtype=np.float32)
+    vmin = float(min(np.min(real_tensor), np.min(generated_tensor)))
+    vmax = float(max(np.max(real_tensor), np.max(generated_tensor)))
+    real_spectrum = ims.Spectrum(
+        name=f"Real tensor {class_name}",
+        values=real_tensor,
+        ret_time=np.arange(real_tensor.shape[0]),
+        drift_time=np.arange(real_tensor.shape[1]),
+        time=datetime.now(),
+        meta_attr={},
+    )
+    generated_spectrum = ims.Spectrum(
+        name=f"Generated tensor {class_name}",
+        values=generated_tensor,
+        ret_time=np.arange(generated_tensor.shape[0]),
+        drift_time=np.arange(generated_tensor.shape[1]),
+        time=datetime.now(),
+        meta_attr={},
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
+    _plot_on_axis(real_spectrum, axes[0], "Real training tensor", vmin=vmin, vmax=vmax)
+    _plot_on_axis(generated_spectrum, axes[1], "Generated tensor", vmin=vmin, vmax=vmax)
+    fig.suptitle(f"Real tensor vs generated tensor: {class_name}")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    _close_figure(fig)
+    return path
+
+
 def export_raw_processed_synthetic_triplet(
     raw: np.ndarray,
     processed: np.ndarray,

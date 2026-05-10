@@ -125,6 +125,10 @@ Important local choices:
 - The generator does not use the discriminator's image shortcut class head for
   its class loss. That prevents the generator from exploiting image-level class
   artifacts instead of producing plausible spectra.
+- The generator has a configurable structure penalty that matches real-batch
+  intensity, high-intensity peak fraction, and border energy. This is aimed at
+  the observed failure mode where synthetic spectra contain random dense blobs
+  and bright edge artifacts.
 - Fake class loss for the discriminator is available but defaults to `0.0`.
   It is useful as an ablation, not as the default.
 
@@ -151,6 +155,7 @@ to stand in for real GC-IMS spectra.
 For thesis-quality claims, prioritize:
 
 - visual triplets in `preprocessing_examples/`
+- exact-resolution `real_tensor_vs_generated_class_*.png` comparisons
 - cross-domain confusion matrices
 - checkpoint sweeps, especially early checkpoints
 - real-only classifier probe performance
@@ -161,12 +166,13 @@ For thesis-quality claims, prioritize:
 python -m acgan_pipeline.main \
   --config configs/acgan_balanced_peakcrop.json \
   --data ~/ACGAN_pipeline/data_fermentation \
-  --output-dir out_sparse_log \
-  --epochs 80 \
-  --lr-d 0.00005 \
-  --discriminator-update-every 2 \
-  --classifier svm
+  --output-dir out_sparse_log
 ```
+
+The config currently stores the 80-epoch run length, slower discriminator
+learning rate, discriminator update cadence, generator structure penalties, and
+early stopping settings. `epochs` is therefore part of the experiment record,
+not a value that needs to be typed manually for the standard run.
 
 After training, evaluate checkpoints if the final model is poor:
 
@@ -180,6 +186,17 @@ for e in 0020 0030 0040 0050 0060 0070 0080; do
     --classifier svm \
     --skip-visualization
 done
+```
+
+With early stopping enabled, also test the selected structural checkpoint:
+
+```bash
+python -m acgan_pipeline.main \
+  --config configs/acgan_balanced_peakcrop.json \
+  --data ~/ACGAN_pipeline/data_fermentation \
+  --generator-checkpoint out_sparse_log/checkpoints/best_early_stopping.pt \
+  --output-dir out_sparse_log_best \
+  --classifier svm
 ```
 
 ## Source Grounding

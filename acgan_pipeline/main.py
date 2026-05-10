@@ -15,6 +15,7 @@ from acgan_pipeline.training.train_acgan import TrainConfig, generate_samples, l
 from acgan_pipeline.visualization.gcims_plots import (
     export_preprocessing_comparison,
     export_raw_processed_synthetic_triplet,
+    export_real_tensor_vs_generated_comparison,
     export_real_vs_generated_comparison,
 )
 
@@ -62,6 +63,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--class-loss-weight", type=float)
     parser.add_argument("--discriminator-fake-class-weight", type=float)
     parser.add_argument("--tv-loss-weight", type=float)
+    parser.add_argument("--generator-intensity-match-weight", type=float)
+    parser.add_argument("--generator-peak-density-weight", type=float)
+    parser.add_argument("--generator-border-weight", type=float)
+    parser.add_argument("--generator-peak-threshold", type=float)
+    parser.add_argument("--generator-peak-temperature", type=float)
+    parser.add_argument("--generator-border-width", type=int)
     parser.add_argument("--label-smoothing", type=float)
     parser.add_argument("--instance-noise-std", type=float)
     parser.add_argument("--instance-noise-decay-epochs", type=int)
@@ -86,6 +93,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discriminator-update-every", type=int)
     parser.add_argument("--sample-every", type=int)
     parser.add_argument("--checkpoint-every", type=int)
+    parser.add_argument("--early-stopping-patience", type=int)
+    parser.add_argument("--early-stopping-min-delta", type=float)
+    parser.add_argument("--early-stopping-metric", type=str)
+    parser.add_argument("--early-stopping-mode", choices=["min", "max"])
     parser.add_argument("--seed", type=int)
     parser.add_argument("--output-dir", type=str)
     parser.add_argument("--samples-per-class", type=int)
@@ -209,6 +220,12 @@ def main() -> None:
         class_loss_weight=args.class_loss_weight,
         discriminator_fake_class_weight=args.discriminator_fake_class_weight,
         tv_loss_weight=args.tv_loss_weight,
+        generator_intensity_match_weight=args.generator_intensity_match_weight,
+        generator_peak_density_weight=args.generator_peak_density_weight,
+        generator_border_weight=args.generator_border_weight,
+        generator_peak_threshold=args.generator_peak_threshold,
+        generator_peak_temperature=args.generator_peak_temperature,
+        generator_border_width=args.generator_border_width,
         label_smoothing=args.label_smoothing,
         instance_noise_std=args.instance_noise_std,
         instance_noise_decay_epochs=args.instance_noise_decay_epochs,
@@ -228,6 +245,10 @@ def main() -> None:
         discriminator_update_every=args.discriminator_update_every,
         sample_every=args.sample_every,
         checkpoint_every=args.checkpoint_every,
+        early_stopping_patience=args.early_stopping_patience,
+        early_stopping_min_delta=args.early_stopping_min_delta,
+        early_stopping_metric=args.early_stopping_metric,
+        early_stopping_mode=args.early_stopping_mode,
         output_dir=args.output_dir,
         seed=args.seed,
     )
@@ -287,6 +308,25 @@ def main() -> None:
             processed_samples[real_idx],
             generated_for_comparison,
             output_dir / "preprocessing_examples" / f"real_vs_generated_class_{class_id}.png",
+            class_name=class_name,
+        )
+        tensor_dataset = GCIMSDataset(
+            processed_samples,
+            labels,
+            target_shape=target_shape,
+            resize_mode=args.resize_mode,
+            min_value=dataset.min_value,
+            max_value=dataset.max_value,
+        )
+        real_tensor = tensor_dataset[real_idx][0].numpy()[0]
+        generated_tensor = synthetic_samples[synthetic_idx]
+        if args.synthetic_viz_denormalized:
+            real_tensor = _denormalize_for_visualization(real_tensor, dataset.min_value, dataset.max_value)
+            generated_tensor = _denormalize_for_visualization(generated_tensor, dataset.min_value, dataset.max_value)
+        export_real_tensor_vs_generated_comparison(
+            real_tensor,
+            generated_tensor,
+            output_dir / "preprocessing_examples" / f"real_tensor_vs_generated_class_{class_id}.png",
             class_name=class_name,
         )
         raw_for_triplet = _raw_visualization_sample(args, preprocessing_report, real_idx, fallback=processed_samples[real_idx])
