@@ -71,21 +71,6 @@ python -m acgan_pipeline.main \
   --output-dir out_acgan
 ```
 
-The balanced config pins `split_seed` and `eval_seed` to 42. This keeps the
-real train/test split and downstream PCA/SVM evaluation fixed while allowing
-`--seed` to test GAN/training randomness independently:
-
-```bash
-nohup python -u -m acgan_pipeline.main \
-  --config configs/acgan_balanced_peakcrop.json \
-  --data ~/ACGAN_pipeline/data_fermentation \
-  --output-dir out_acgan_seed7 \
-  --samples-per-class 22 \
-  --seed 7 \
-  --classifier svm \
-  > out_acgan_seed7.log 2>&1 &
-```
-
 The config defaults keep `shape_mode` set to `auto`, so normal runs should not
 need manual `--height` or `--width`. The loader computes one shared peak-aware
 crop across the dataset, then rounds the resulting model tensor size to a

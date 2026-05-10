@@ -60,8 +60,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "early_stopping_metric": "g_structure",
     "early_stopping_mode": "min",
     "seed": 42,
-    "split_seed": None,
-    "eval_seed": None,
     "output_dir": "outputs",
     "samples_per_class": 5,
     "rip_drift_start": None,
