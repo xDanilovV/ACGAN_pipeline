@@ -42,6 +42,7 @@ class TrainConfig:
     discriminator_class_image_head_scale: float = 1.0
     pretrain_classifier_epochs: int = 0
     pretrain_classifier_lr: float = 1e-3
+    generator_class_uses_image_head: bool = False
     generator_steps: int = 1
     discriminator_update_every: int = 1
     sample_every: int = 10
@@ -140,7 +141,7 @@ def train_acgan(
                 noisy_real = _add_instance_noise(real_samples, instance_noise_std)
                 noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
                 real_logits, real_class_logits = discriminator(noisy_real, labels)
-                fake_logits, _ = discriminator(noisy_fake, labels)
+                fake_logits, _ = discriminator(noisy_fake, labels, use_image_class_head=False)
                 d_loss, d_parts = discriminator_loss(
                     real_logits,
                     fake_logits,
@@ -164,7 +165,11 @@ def train_acgan(
                 optimizer_g.zero_grad(set_to_none=True)
                 noise = torch.randn(batch_size, config.noise_dim, device=device)
                 fake_samples = generator(noise, labels)
-                fake_logits, fake_class_logits = discriminator(fake_samples, labels)
+                fake_logits, fake_class_logits = discriminator(
+                    fake_samples,
+                    labels,
+                    use_image_class_head=config.generator_class_uses_image_head,
+                )
                 g_loss, g_parts = generator_loss(
                     fake_logits,
                     fake_class_logits,

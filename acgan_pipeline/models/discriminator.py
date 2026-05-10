@@ -113,7 +113,13 @@ class Discriminator(nn.Module):
         self.class_head = _maybe_sn(nn.Linear(512, num_classes), use_spectral_norm)
         self.class_image_head = nn.Linear(input_shape[0] * input_shape[1], num_classes)
 
-    def forward(self, x: Tensor, labels: Tensor | None = None) -> tuple[Tensor, Tensor]:
+    def forward(
+        self,
+        x: Tensor,
+        labels: Tensor | None = None,
+        *,
+        use_image_class_head: bool = True,
+    ) -> tuple[Tensor, Tensor]:
         x_features = x.add(1.0).mul(0.5).clamp(0.0, 1.0)
         features = self.features(x_features)
         feature_pooled = torch.cat([self.avg_pool(features), self.max_pool(features)], dim=1).flatten(1)
@@ -128,7 +134,7 @@ class Discriminator(nn.Module):
             )
             real_fake_logits = real_fake_logits + self.projection_scale * projected
         class_logits = self.class_head(shared)
-        if self.class_image_head_scale > 0:
+        if use_image_class_head and self.class_image_head_scale > 0:
             class_pixels = _samplewise_standardize(x_features).flatten(1)
             class_logits = class_logits + self.class_image_head_scale * self.class_image_head(class_pixels)
         return real_fake_logits, class_logits

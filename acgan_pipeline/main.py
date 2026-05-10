@@ -75,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discriminator-class-image-head-scale", type=float)
     parser.add_argument("--pretrain-classifier-epochs", type=int)
     parser.add_argument("--pretrain-classifier-lr", type=float)
+    parser.add_argument("--generator-class-uses-image-head", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument("--no-generator-class-uses-image-head", action="store_false", default=argparse.SUPPRESS, dest="generator_class_uses_image_head")
     parser.add_argument("--generator-steps", type=int)
     parser.add_argument("--discriminator-update-every", type=int)
     parser.add_argument("--sample-every", type=int)
@@ -202,6 +204,7 @@ def main() -> None:
         discriminator_class_image_head_scale=args.discriminator_class_image_head_scale,
         pretrain_classifier_epochs=args.pretrain_classifier_epochs,
         pretrain_classifier_lr=args.pretrain_classifier_lr,
+        generator_class_uses_image_head=args.generator_class_uses_image_head,
         generator_steps=args.generator_steps,
         discriminator_update_every=args.discriminator_update_every,
         sample_every=args.sample_every,

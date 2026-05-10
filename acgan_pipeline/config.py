@@ -41,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "discriminator_class_image_head_scale": 1.0,
     "pretrain_classifier_epochs": 30,
     "pretrain_classifier_lr": 1e-3,
+    "generator_class_uses_image_head": False,
     "generator_steps": 1,
     "discriminator_update_every": 1,
     "sample_every": 5,

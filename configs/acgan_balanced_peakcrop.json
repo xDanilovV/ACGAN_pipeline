@@ -29,6 +29,7 @@
   "discriminator_class_image_head_scale": 1.0,
   "pretrain_classifier_epochs": 30,
   "pretrain_classifier_lr": 0.001,
+  "generator_class_uses_image_head": false,
   "generator_base_channels": 256,
   "generator_steps": 1,
   "discriminator_update_every": 1,
