@@ -93,6 +93,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rip-drift-stop", type=float, help="Last RIP-relative drift-time value to keep.")
     parser.add_argument("--crop-rt-start", type=float)
     parser.add_argument("--crop-rt-stop", type=float)
+    parser.add_argument("--intensity-baseline-percentile", type=float, help="Subtract this per-spectrum intensity percentile before clipping/log scaling.")
+    parser.add_argument("--intensity-clip-low-percentile", type=float, help="Optional per-spectrum low percentile clipping after baseline subtraction.")
+    parser.add_argument("--intensity-clip-high-percentile", type=float, help="Optional per-spectrum high percentile clipping after baseline subtraction.")
+    parser.add_argument("--intensity-log1p", action="store_true", default=argparse.SUPPRESS, help="Apply log1p compression after baseline subtraction/clipping.")
+    parser.add_argument("--no-intensity-log1p", action="store_false", default=argparse.SUPPRESS, dest="intensity_log1p")
     parser.add_argument("--peak-crop", action="store_true", default=argparse.SUPPRESS, help="Compute a shared peak-aware crop before resizing.")
     parser.add_argument("--no-peak-crop", action="store_false", default=argparse.SUPPRESS, dest="peak_crop")
     parser.add_argument("--peak-percentile", type=float)
@@ -126,6 +131,10 @@ def main() -> None:
             drift_stop=args.rip_drift_stop,
             retention_start=args.crop_rt_start,
             retention_stop=args.crop_rt_stop,
+            intensity_baseline_percentile=args.intensity_baseline_percentile,
+            intensity_clip_low_percentile=args.intensity_clip_low_percentile,
+            intensity_clip_high_percentile=args.intensity_clip_high_percentile,
+            intensity_log1p=args.intensity_log1p,
         )
         peak_crop_config = PeakCropConfig(
             enabled=args.peak_crop,
@@ -330,6 +339,10 @@ def _raw_visualization_sample(args: argparse.Namespace, report: dict, index: int
                 drift_stop=None,
                 retention_start=None,
                 retention_stop=None,
+                intensity_baseline_percentile=None,
+                intensity_clip_low_percentile=None,
+                intensity_clip_high_percentile=None,
+                intensity_log1p=False,
             ),
         )
         return values

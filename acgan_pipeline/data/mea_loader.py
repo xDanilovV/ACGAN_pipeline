@@ -25,6 +25,10 @@ class MeaPreprocessingConfig:
     drift_stop: float | None = None
     retention_start: float | None = None
     retention_stop: float | None = None
+    intensity_baseline_percentile: float | None = None
+    intensity_clip_low_percentile: float | None = None
+    intensity_clip_high_percentile: float | None = None
+    intensity_log1p: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,12 +132,19 @@ def load_mea_file(
         )
 
     values = np.asarray(spectrum.values, dtype=np.float32)
+    raw_min = float(np.min(values))
+    raw_max = float(np.max(values))
+    values = _transform_intensity(values, config)
     info = {
         "path": str(path),
         "name": getattr(spectrum, "name", path.stem),
         "original_shape": list(original_shape),
         "processed_shape": list(values.shape),
         "preprocessing": asdict(config),
+        "raw_intensity_min": raw_min,
+        "raw_intensity_max": raw_max,
+        "processed_intensity_min": float(np.min(values)),
+        "processed_intensity_max": float(np.max(values)),
         "retention_time_min": float(np.min(spectrum.ret_time)),
         "retention_time_max": float(np.max(spectrum.ret_time)),
         "drift_time_min": float(np.min(spectrum.drift_time)),
@@ -274,6 +285,30 @@ def _add_support(existing: np.ndarray | None, support: np.ndarray) -> np.ndarray
 def _apply_index_crop(values: np.ndarray, crop: tuple[int, int, int, int]) -> np.ndarray:
     row_start, row_stop, col_start, col_stop = crop
     return values[row_start:min(row_stop, values.shape[0]), col_start:min(col_stop, values.shape[1])]
+
+
+def _transform_intensity(values: np.ndarray, config: MeaPreprocessingConfig) -> np.ndarray:
+    transformed = np.asarray(values, dtype=np.float32)
+    if config.intensity_baseline_percentile is not None:
+        baseline = np.percentile(transformed, config.intensity_baseline_percentile)
+        transformed = transformed - np.float32(baseline)
+
+    if config.intensity_log1p or config.intensity_baseline_percentile is not None:
+        transformed = np.maximum(transformed, 0.0)
+
+    if config.intensity_clip_low_percentile is not None or config.intensity_clip_high_percentile is not None:
+        clip_min = None
+        clip_max = None
+        if config.intensity_clip_low_percentile is not None:
+            clip_min = np.percentile(transformed, config.intensity_clip_low_percentile)
+        if config.intensity_clip_high_percentile is not None:
+            clip_max = np.percentile(transformed, config.intensity_clip_high_percentile)
+        transformed = np.clip(transformed, clip_min, clip_max)
+
+    if config.intensity_log1p:
+        transformed = np.log1p(np.maximum(transformed, 0.0))
+
+    return transformed.astype(np.float32, copy=False)
 
 
 def _import_gcims():

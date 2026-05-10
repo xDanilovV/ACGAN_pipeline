@@ -40,6 +40,10 @@ def load_experiment_inputs(config_path: str | None, data_path: str) -> tuple[np.
             drift_stop=args.rip_drift_stop,
             retention_start=args.crop_rt_start,
             retention_stop=args.crop_rt_stop,
+            intensity_baseline_percentile=args.intensity_baseline_percentile,
+            intensity_clip_low_percentile=args.intensity_clip_low_percentile,
+            intensity_clip_high_percentile=args.intensity_clip_high_percentile,
+            intensity_log1p=args.intensity_log1p,
         )
         peak_crop_config = PeakCropConfig(
             enabled=args.peak_crop,

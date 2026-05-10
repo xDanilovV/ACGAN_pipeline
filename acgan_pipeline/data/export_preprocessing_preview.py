@@ -26,6 +26,10 @@ def main() -> None:
     parser.add_argument("--rip-drift-stop", type=float, default=None)
     parser.add_argument("--crop-rt-start", type=float, default=None)
     parser.add_argument("--crop-rt-stop", type=float, default=None)
+    parser.add_argument("--intensity-baseline-percentile", type=float, default=5.0)
+    parser.add_argument("--intensity-clip-low-percentile", type=float, default=None)
+    parser.add_argument("--intensity-clip-high-percentile", type=float, default=99.8)
+    parser.add_argument("--intensity-log1p", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--peak-crop", action="store_true")
     parser.add_argument("--peak-percentile", type=float, default=99.7)
     parser.add_argument("--peak-relative-threshold", type=float, default=0.05)
@@ -43,6 +47,10 @@ def main() -> None:
         drift_stop=args.rip_drift_stop,
         retention_start=args.crop_rt_start,
         retention_stop=args.crop_rt_stop,
+        intensity_baseline_percentile=args.intensity_baseline_percentile,
+        intensity_clip_low_percentile=args.intensity_clip_low_percentile,
+        intensity_clip_high_percentile=args.intensity_clip_high_percentile,
+        intensity_log1p=args.intensity_log1p,
     )
     values, _ = load_mea_file(
         path,
