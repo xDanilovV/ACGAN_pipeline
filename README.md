@@ -1,21 +1,19 @@
 # AC-GAN GC-IMS Pipeline
 
-Reusable PyTorch pipeline for class-conditioned synthetic GC-IMS-like 2D spectra.
+Reusable PyTorch pipeline for class-conditioned synthetic GC-IMS spectra. The
+default workflow is config-driven: GC-IMS preprocessing, shared region-of-interest
+detection, tensor shape selection, AC-GAN training, synthetic sample export, and
+evaluation are all controlled from `configs/acgan_balanced_peakcrop.json`.
 
 ## Inputs
 
 The pipeline supports native `.mea` folders and a simple `.npz` fallback.
 
-For `.mea`, provide:
+For `.mea`, provide a folder containing `.mea` files. Labels can be supplied with
+a CSV or inferred from the fermentation dataset folder layout.
 
-- a folder containing `.mea` files
-- optionally, a labels CSV with one file column and one label column
-
-Accepted file columns: `file`, `filename`, `path`, `sample`, `name`.
+Accepted CSV file columns: `file`, `filename`, `path`, `sample`, `name`.
 Accepted label columns: `label`, `class`, `target`, `group`.
-
-If no labels CSV is provided, labels are inferred from folders. This supports
-the fermentation dataset layout:
 
 ```text
 data_fermentation/
@@ -29,108 +27,118 @@ data_fermentation/
         t1_*.mea
 ```
 
-Use `--mea-label-mode class` for the default 10 culture/combination classes, or
+Use `--mea-label-mode class` for the default culture/combination classes, or
 `--mea-label-mode culture_type` for a broader pure-vs-mixed experiment.
-
-Example:
-
-```csv
-filename,label
-sample_001.mea,control
-sample_002.mea,treatment
-```
 
 The `.npz` fallback expects:
 
 - `samples`: array shaped `[N, H, W]`
 - `labels`: integer class labels shaped `[N]`
 
-Dataset-specific loading should be handled by replacing `load_npz_dataset` in
-`acgan_pipeline/main.py` or by passing arrays directly to `GCIMSDataset`.
-
 ## Run
+
+Install dependencies:
 
 ```powershell
 .\.venv\Scripts\pip.exe install -r requirements.txt
-.\.venv\Scripts\python.exe -m acgan_pipeline.data.inspect_fermentation C:\Users\user\PycharmProjects\PythonProject\data_fermentation
-.\.venv\Scripts\python.exe -m acgan_pipeline.main `
-  --input-format mea `
-  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
-  --epochs 100 `
-  --batch-size 32 `
-  --synthetic-viz-denormalized
 ```
 
-Optional preprocessing controls:
+Inspect the fermentation labels:
+
+```powershell
+.\.venv\Scripts\python.exe -m acgan_pipeline.data.inspect_fermentation `
+  C:\Users\user\PycharmProjects\PythonProject\data_fermentation
+```
+
+Run the config-driven AC-GAN pipeline locally:
 
 ```powershell
 .\.venv\Scripts\python.exe -m acgan_pipeline.main `
-  --input-format mea `
+  --config configs\acgan_balanced_peakcrop.json `
   --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
-  --rip-drift-start 1.05 `
-  --rip-drift-stop 2.00 `
-  --crop-rt-start 80 `
-  --crop-rt-stop 500
+  --output-dir out_acgan
 ```
 
-For `.mea` input, RIP removal uses gc-ims-tools:
+Run the same experiment on Beast:
 
-```python
-ims.Spectrum.read_mea(path).riprel().cut_dt(1.05, stop)
+```bash
+cd ~/ACGAN_pipeline
+git pull
+source .venv/bin/activate
+python -m acgan_pipeline.main \
+  --config configs/acgan_balanced_peakcrop.json \
+  --data ~/ACGAN_pipeline/data_fermentation \
+  --output-dir out_acgan \
+  --epochs 80 \
+  --lr-d 0.00005 \
+  --discriminator-update-every 2 \
+  --classifier svm
 ```
 
-The default keeps drift-time values after `1.05` in RIP-relative coordinates.
-This is a practical first setting from the documented gc-ims-tools workflow;
-we should tune it by visually inspecting your spectra.
+The config defaults keep `shape_mode` set to `auto`, so normal runs should not
+need manual `--height` or `--width`. The loader computes one shared peak-aware
+crop across the dataset, then rounds the resulting model tensor size to a
+multiple of 16. This keeps all spectra aligned while avoiding unnecessary empty
+background.
 
-Before long training runs, compare resize choices:
+## Preprocessing
 
-```powershell
-.\.venv\Scripts\python.exe -m acgan_pipeline.data.export_preprocessing_preview `
-  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
-  --height 384 `
-  --width 128 `
-  --resize-mode area
+For `.mea` data, the preprocessing path is:
+
+1. read the spectrum with `gc-ims-tools`
+2. convert drift time to RIP-relative coordinates
+3. apply optional drift/retention cuts
+4. subtract a per-spectrum intensity baseline percentile
+5. clip high-intensity outliers by percentile
+6. apply `log1p` compression
+7. compute one shared peak-aware crop for all samples
+8. resize to the automatically selected GAN tensor shape
+
+Current recommended intensity settings are stored in
+`configs/acgan_balanced_peakcrop.json`:
+
+```json
+"intensity_baseline_percentile": 25.0,
+"intensity_clip_high_percentile": 99.9,
+"intensity_log1p": true
 ```
 
-The original processed spectra are roughly `6123 x 1900`, so square `128 x 128`
-is too compressed for thesis-quality synthetic spectra. Prefer rectangular
-model inputs such as `384 x 128` or `512 x 160`, both divisible by 16.
+Do not use `--no-peak-crop` for normal `.mea` training. It is only a debugging
+switch; raw `.mea` files may not have identical shapes, and the shared crop is
+the step that makes the dataset consistently stackable.
 
-For a peak-aware crop, compute a shared high-intensity window before resizing:
+Preview preprocessing without training:
 
 ```powershell
 .\.venv\Scripts\python.exe -m acgan_pipeline.data.export_preprocessing_preview `
   --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
   --peak-crop `
-  --height 512 `
-  --width 128 `
-  --resize-mode area
+  --output-dir outputs_preprocessing_preview
 ```
 
-Training with the shared crop:
+## Diagnostics
 
-```powershell
-.\.venv\Scripts\python.exe -m acgan_pipeline.main `
-  --input-format mea `
-  --data C:\Users\user\PycharmProjects\PythonProject\data_fermentation `
-  --mea-label-mode class `
-  --peak-crop `
-  --height 512 `
-  --width 128 `
-  --resize-mode area `
-  --epochs 100 `
-  --batch-size 4 `
-  --samples-per-class 30 `
-  --output-dir outputs_peakcrop_512x128_svm `
-  --classifier svm `
-  --synthetic-viz-denormalized
+Before trusting GAN training, verify that the discriminator class head can learn
+real spectra:
+
+```bash
+python -m acgan_pipeline.diagnostics.classifier_probe \
+  --config configs/acgan_balanced_peakcrop.json \
+  --data ~/ACGAN_pipeline/data_fermentation \
+  --output-dir runs_classifier_probe \
+  --epochs 80 \
+  --batch-size 16 \
+  --lr 0.001
 ```
+
+If this probe is near chance, the issue is preprocessing, labels, or architecture
+before it is a GAN issue.
 
 ## Outputs
 
-Each run writes to `outputs/` by default:
+Each run writes to the selected output directory:
 
+- `effective_config.json`
 - `preprocessing_report.json`
 - `preprocessing_examples/`
 - `checkpoints/`
@@ -139,16 +147,40 @@ Each run writes to `outputs/` by default:
 - `synthetic_samples_denormalized_for_visualization.npz` when requested
 - `evaluation/metrics.json`
 - `evaluation/*_confusion_matrix.csv`
+- `evaluation/*_confusion_matrix.png`
 
-## Evaluation Experiments
+The preprocessing examples include a raw/processed/synthetic triplet for visual
+inspection.
 
-The evaluation suite runs:
+## Evaluation
 
-- train on real, test on real
-- train on real + synthetic, test on real
-- train on real, test on synthetic
-- train on synthetic, test on real
+The evaluation suite reports:
 
-Reported metrics include accuracy, balanced accuracy, macro precision/recall/F1,
-weighted F1, per-class precision/recall/F1, support, and confusion matrices.
+- train real, test real
+- train real + synthetic, test real
+- train real, test synthetic
+- train synthetic, test real
 
+The default downstream classifier is PCA + SVM. Metrics include accuracy,
+balanced accuracy, macro precision/recall/F1, weighted F1, per-class metrics,
+support, and confusion matrices.
+
+Compact metric summary:
+
+```bash
+python - <<'PY'
+import json
+m = json.load(open("out_acgan/evaluation/metrics.json"))
+for k in ["real_only_test_real", "real_plus_synthetic_test_real", "real_only_test_synthetic", "synthetic_only_test_real"]:
+    r = m[k]
+    print(k, "| acc", round(r["accuracy"], 4), "| bal", round(r["balanced_accuracy"], 4), "| f1", round(r["macro_f1"], 4))
+PY
+```
+
+GAN checkpoints can differ sharply. When training is unstable, evaluate saved
+checkpoints rather than assuming the final epoch is best.
+
+## Documentation
+
+See `docs/technical_pipeline.md` for the preprocessing rationale, AC-GAN design
+notes, evaluation interpretation, and literature grounding.
