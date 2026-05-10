@@ -8,11 +8,15 @@ import numpy as np
 
 from acgan_pipeline.config import load_config
 from acgan_pipeline.data.dataset import GCIMSDataset
-from acgan_pipeline.data.mea_loader import MeaPreprocessingConfig, PeakCropConfig, load_mea_folder
+from acgan_pipeline.data.mea_loader import MeaPreprocessingConfig, PeakCropConfig, load_mea_file, load_mea_folder
 from acgan_pipeline.evaluation import run_core_evaluation_suite, stratified_train_test_split
 from acgan_pipeline.preprocessing import PreprocessingConfig, preprocess_dataset
 from acgan_pipeline.training.train_acgan import TrainConfig, generate_samples, load_generator_from_checkpoint, train_acgan
-from acgan_pipeline.visualization.gcims_plots import export_preprocessing_comparison, export_real_vs_generated_comparison
+from acgan_pipeline.visualization.gcims_plots import (
+    export_preprocessing_comparison,
+    export_raw_processed_synthetic_triplet,
+    export_real_vs_generated_comparison,
+)
 
 
 def load_npz_dataset(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
@@ -56,6 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr-g", type=float)
     parser.add_argument("--lr-d", type=float)
     parser.add_argument("--class-loss-weight", type=float)
+    parser.add_argument("--discriminator-fake-class-weight", type=float)
     parser.add_argument("--tv-loss-weight", type=float)
     parser.add_argument("--label-smoothing", type=float)
     parser.add_argument("--instance-noise-std", type=float)
@@ -189,6 +194,7 @@ def main() -> None:
         lr_g=args.lr_g,
         lr_d=args.lr_d,
         class_loss_weight=args.class_loss_weight,
+        discriminator_fake_class_weight=args.discriminator_fake_class_weight,
         tv_loss_weight=args.tv_loss_weight,
         label_smoothing=args.label_smoothing,
         instance_noise_std=args.instance_noise_std,
@@ -270,6 +276,14 @@ def main() -> None:
             output_dir / "preprocessing_examples" / f"real_vs_generated_class_{class_id}.png",
             class_name=class_name,
         )
+        raw_for_triplet = _raw_visualization_sample(args, preprocessing_report, real_idx, fallback=processed_samples[real_idx])
+        export_raw_processed_synthetic_triplet(
+            raw_for_triplet,
+            processed_samples[real_idx],
+            generated_for_comparison,
+            output_dir / "preprocessing_examples" / f"raw_processed_synthetic_class_{class_id}.png",
+            class_name=class_name,
+        )
 
     if not args.skip_evaluation:
         evaluation = run_core_evaluation_suite(
@@ -300,6 +314,27 @@ def main() -> None:
 
 def _denormalize_for_visualization(sample: np.ndarray, min_value: float, max_value: float) -> np.ndarray:
     return ((sample + 1.0) / 2.0) * (max_value - min_value) + min_value
+
+
+def _raw_visualization_sample(args: argparse.Namespace, report: dict, index: int, *, fallback: np.ndarray) -> np.ndarray:
+    metadata = report.get("mea_metadata")
+    if args.input_format != "mea" or not metadata:
+        return fallback
+    try:
+        item = metadata[min(max(index, 0), len(metadata) - 1)]
+        values, _ = load_mea_file(
+            item["path"],
+            config=MeaPreprocessingConfig(
+                rip_relative=False,
+                drift_start=None,
+                drift_stop=None,
+                retention_start=None,
+                retention_stop=None,
+            ),
+        )
+        return values
+    except Exception:
+        return fallback
 
 
 def _fixed_target_shape(args: argparse.Namespace) -> tuple[int, int] | None:

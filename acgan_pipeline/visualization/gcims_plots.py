@@ -131,6 +131,63 @@ def export_real_vs_generated_comparison(
     return path
 
 
+def export_raw_processed_synthetic_triplet(
+    raw: np.ndarray,
+    processed: np.ndarray,
+    synthetic: np.ndarray,
+    path: str | Path,
+    *,
+    class_name: str,
+) -> Path:
+    """Save raw real, preprocessed real, and generated spectra in one figure."""
+
+    ims = _import_gcims()
+    import matplotlib.pyplot as plt
+
+    raw = np.asarray(raw, dtype=np.float32)
+    processed = np.asarray(processed, dtype=np.float32)
+    synthetic = np.asarray(synthetic, dtype=np.float32)
+    processed_vmin = float(min(np.min(processed), np.min(synthetic)))
+    processed_vmax = float(max(np.max(processed), np.max(synthetic)))
+    spectra = [
+        ims.Spectrum(
+            name=f"Raw {class_name}",
+            values=raw,
+            ret_time=np.arange(raw.shape[0]),
+            drift_time=np.arange(raw.shape[1]),
+            time=datetime.now(),
+            meta_attr={},
+        ),
+        ims.Spectrum(
+            name=f"Preprocessed {class_name}",
+            values=processed,
+            ret_time=np.arange(processed.shape[0]),
+            drift_time=np.arange(processed.shape[1]),
+            time=datetime.now(),
+            meta_attr={},
+        ),
+        ims.Spectrum(
+            name=f"Generated {class_name}",
+            values=synthetic,
+            ret_time=np.arange(synthetic.shape[0]),
+            drift_time=np.arange(synthetic.shape[1]),
+            time=datetime.now(),
+            meta_attr={},
+        ),
+    ]
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), constrained_layout=True)
+    _plot_on_axis(spectra[0], axes[0], "Before preprocessing")
+    _plot_on_axis(spectra[1], axes[1], "After preprocessing", vmin=processed_vmin, vmax=processed_vmax)
+    _plot_on_axis(spectra[2], axes[2], "Generated", vmin=processed_vmin, vmax=processed_vmax)
+    fig.suptitle(f"Raw, preprocessed, and generated spectrum: {class_name}")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    _close_figure(fig)
+    return path
+
+
 def _plot_on_axis(spectrum, ax, title: str, *, vmin: float | None = None, vmax: float | None = None) -> None:
     values = spectrum.values
     image = ax.imshow(values, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)

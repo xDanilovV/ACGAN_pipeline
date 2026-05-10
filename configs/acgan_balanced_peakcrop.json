@@ -16,6 +16,7 @@
   "lr_g": 0.0002,
   "lr_d": 0.0001,
   "class_loss_weight": 1.0,
+  "discriminator_fake_class_weight": 0.5,
   "tv_loss_weight": 0.0001,
   "projection_scale": 0.0,
   "discriminator_base_channels": 64,

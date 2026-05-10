@@ -27,6 +27,7 @@ class TrainConfig:
     lr_d: float | None = None
     betas: tuple[float, float] = (0.5, 0.999)
     class_loss_weight: float = 1.0
+    discriminator_fake_class_weight: float = 0.0
     tv_loss_weight: float = 1e-4
     label_smoothing: float = 0.0
     instance_noise_std: float = 0.0
@@ -124,6 +125,7 @@ def train_acgan(
         d_adv_real_meter = AverageMeter()
         d_adv_fake_meter = AverageMeter()
         d_cls_meter = AverageMeter()
+        d_cls_fake_meter = AverageMeter()
         instance_noise_std = _current_instance_noise(config, epoch)
         real_target = 1.0 - config.label_smoothing
 
@@ -141,13 +143,16 @@ def train_acgan(
                 noisy_real = _add_instance_noise(real_samples, instance_noise_std)
                 noisy_fake = _add_instance_noise(fake_samples, instance_noise_std)
                 real_logits, real_class_logits = discriminator(noisy_real, labels)
-                fake_logits, _ = discriminator(noisy_fake, labels, use_image_class_head=False)
+                fake_logits, fake_class_logits_for_d = discriminator(noisy_fake, labels, use_image_class_head=False)
                 d_loss, d_parts = discriminator_loss(
                     real_logits,
                     fake_logits,
                     real_class_logits,
                     labels,
+                    fake_class_logits=fake_class_logits_for_d,
+                    fake_labels=labels,
                     class_weight=config.class_loss_weight,
+                    fake_class_weight=config.discriminator_fake_class_weight,
                     real_target=real_target,
                 )
                 d_loss.backward()
@@ -159,6 +164,7 @@ def train_acgan(
                 d_adv_real_meter.update(d_parts["d_adv_real"], batch_size)
                 d_adv_fake_meter.update(d_parts["d_adv_fake"], batch_size)
                 d_cls_meter.update(d_parts["d_cls"], batch_size)
+                d_cls_fake_meter.update(d_parts["d_cls_fake"], batch_size)
 
             # Train generator to fool discriminator and produce class-consistent spectra.
             for _ in range(max(1, config.generator_steps)):
@@ -197,6 +203,7 @@ def train_acgan(
             "d_adv_real": d_adv_real_meter.average,
             "d_adv_fake": d_adv_fake_meter.average,
             "d_cls": d_cls_meter.average,
+            "d_cls_fake": d_cls_fake_meter.average,
             "classification_accuracy": acc_meter.average,
             "instance_noise_std": instance_noise_std,
             "seconds": time.perf_counter() - epoch_started_at,

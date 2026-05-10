@@ -24,6 +24,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "lr_g": 2e-4,
     "lr_d": 2e-5,
     "class_loss_weight": 1.0,
+    "discriminator_fake_class_weight": 0.5,
     "tv_loss_weight": 1e-4,
     "label_smoothing": 0.1,
     "instance_noise_std": 0.1,

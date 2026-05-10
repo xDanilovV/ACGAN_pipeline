@@ -45,18 +45,25 @@ def discriminator_loss(
     fake_logits: Tensor,
     real_class_logits: Tensor,
     labels: Tensor,
+    fake_class_logits: Tensor | None = None,
+    fake_labels: Tensor | None = None,
     class_weight: float = 1.0,
+    fake_class_weight: float = 0.0,
     real_target: float = 1.0,
     fake_target: float = 0.0,
 ) -> tuple[Tensor, dict[str, float]]:
     adv_real = adversarial_bce_loss(real_logits, True, real_target=real_target, fake_target=fake_target)
     adv_fake = adversarial_bce_loss(fake_logits, False, real_target=real_target, fake_target=fake_target)
-    cls = classification_loss(real_class_logits, labels)
-    loss = adv_real + adv_fake + class_weight * cls
+    cls_real = classification_loss(real_class_logits, labels)
+    cls_fake = torch.zeros((), dtype=real_logits.dtype, device=real_logits.device)
+    if fake_class_logits is not None and fake_labels is not None and fake_class_weight > 0:
+        cls_fake = classification_loss(fake_class_logits, fake_labels)
+    loss = adv_real + adv_fake + class_weight * cls_real + fake_class_weight * cls_fake
     parts = {
         "d_adv_real": float(adv_real.detach().cpu()),
         "d_adv_fake": float(adv_fake.detach().cpu()),
-        "d_cls": float(cls.detach().cpu()),
+        "d_cls": float(cls_real.detach().cpu()),
+        "d_cls_fake": float(cls_fake.detach().cpu()),
     }
     return loss, parts
 
