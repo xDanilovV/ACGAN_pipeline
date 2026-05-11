@@ -286,7 +286,25 @@ def _add_support(existing: np.ndarray | None, support: np.ndarray) -> np.ndarray
 
 def _apply_index_crop(values: np.ndarray, crop: tuple[int, int, int, int]) -> np.ndarray:
     row_start, row_stop, col_start, col_stop = crop
-    return values[row_start:min(row_stop, values.shape[0]), col_start:min(col_stop, values.shape[1])]
+    out_shape = (max(0, row_stop - row_start), max(0, col_stop - col_start))
+    cropped = np.zeros(out_shape, dtype=values.dtype)
+
+    src_row_start = max(0, row_start)
+    src_col_start = max(0, col_start)
+    src_row_stop = min(row_stop, values.shape[0])
+    src_col_stop = min(col_stop, values.shape[1])
+    if src_row_stop <= src_row_start or src_col_stop <= src_col_start:
+        return cropped
+
+    dst_row_start = src_row_start - row_start
+    dst_col_start = src_col_start - col_start
+    dst_row_stop = dst_row_start + (src_row_stop - src_row_start)
+    dst_col_stop = dst_col_start + (src_col_stop - src_col_start)
+    cropped[dst_row_start:dst_row_stop, dst_col_start:dst_col_stop] = values[
+        src_row_start:src_row_stop,
+        src_col_start:src_col_stop,
+    ]
+    return cropped
 
 
 def _transform_intensity(values: np.ndarray, config: MeaPreprocessingConfig) -> np.ndarray:
