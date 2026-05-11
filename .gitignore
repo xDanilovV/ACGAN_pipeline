@@ -1,11 +1,37 @@
-﻿.venv/
+.venv/
 __pycache__/
 *.pyc
 .idea/
+
+# Local datasets
+data_fermentation/
+data_honey_botanical/
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+*.mea
+
+# Generated runs and diagnostics
 outputs/
 outputs*/
-data_fermentation/
-*.mea
+out*/
+runs*/
+
+# Model and array artifacts
+models/*
+!models/.gitkeep
 *.pt
 *.pth
 *.npz
+
+# Report outputs kept locally unless explicitly selected
+reports/*
+!reports/.gitkeep
+!reports/figures/
+reports/figures/*
+!reports/figures/.gitkeep
+
+# Notebook state
+notebooks/.ipynb_checkpoints/

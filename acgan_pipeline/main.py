@@ -21,11 +21,7 @@ from acgan_pipeline.visualization.gcims_plots import (
 
 
 def load_npz_dataset(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
-    """Example loader for ``.npz`` files containing ``samples`` and ``labels``.
-
-    Replace this function with a project-specific loader for MATLAB files,
-    vendor exports, HDF5, CSV folders, or other GC-IMS storage formats.
-    """
+    """Load ``.npz`` files containing ``samples`` and ``labels`` arrays."""
 
     data = np.load(path)
     return data["samples"], data["labels"]

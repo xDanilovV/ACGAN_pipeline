@@ -168,7 +168,6 @@ def train_acgan(
             labels = labels.to(device, non_blocking=True)
             batch_size = real_samples.size(0)
 
-            # Train discriminator on real spectra and detached synthetic spectra.
             should_update_d = batch_index % max(1, config.discriminator_update_every) == 0
             if should_update_d:
                 optimizer_d.zero_grad(set_to_none=True)
@@ -200,7 +199,6 @@ def train_acgan(
                 d_cls_meter.update(d_parts["d_cls"], batch_size)
                 d_cls_fake_meter.update(d_parts["d_cls_fake"], batch_size)
 
-            # Train generator to fool discriminator and produce class-consistent spectra.
             for _ in range(max(1, config.generator_steps)):
                 optimizer_g.zero_grad(set_to_none=True)
                 noise = torch.randn(batch_size, config.noise_dim, device=device)

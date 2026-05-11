@@ -1,8 +1,8 @@
 # Technical Pipeline
 
 This document describes the current AC-GAN GC-IMS workflow, with emphasis on
-the failure points we have been debugging: preprocessing, class conditioning,
-synthetic spectra quality, and downstream evaluation.
+the main failure points encountered during development: preprocessing, class
+conditioning, synthetic spectra quality, and downstream evaluation.
 
 ## Design Goal
 
