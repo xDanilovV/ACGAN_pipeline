@@ -16,7 +16,6 @@ from acgan_pipeline.data.mea_loader import (
     load_mea_folder,
 )
 from acgan_pipeline.main import _fixed_target_shape, _resolve_target_shape
-from acgan_pipeline.visualization.gcims_plots import export_spectrum_plot
 
 
 def main() -> None:
@@ -106,11 +105,6 @@ def main() -> None:
     generated_output = out_dir / "03_generated_sample.png"
 
     _export_native_mea_plot(real_path, raw_output, title=f"Raw native spectrum: {class_name}")
-    export_spectrum_plot(
-        processed_samples[real_idx],
-        processed_output,
-        title=f"Processed spectrum: {class_name}",
-    )
 
     generated = np.asarray(synthetic_samples[synthetic_idx], dtype=np.float32)
     if not args.normalized_synthetic:
@@ -121,10 +115,22 @@ def main() -> None:
             resize_mode=ns.resize_mode,
         )
         generated = ((generated + 1.0) / 2.0) * (dataset.max_value - dataset.min_value) + dataset.min_value
-    export_spectrum_plot(
+    processed = np.asarray(processed_samples[real_idx], dtype=np.float32)
+    processed_vmin = float(min(np.min(processed), np.min(generated)))
+    processed_vmax = float(max(np.max(processed), np.max(generated)))
+    _export_array_heatmap(
+        processed,
+        processed_output,
+        title=f"Processed spectrum: {class_name}",
+        vmin=processed_vmin,
+        vmax=processed_vmax,
+    )
+    _export_array_heatmap(
         generated,
         generated_output,
         title=f"Generated spectrum: {class_name}",
+        vmin=processed_vmin,
+        vmax=processed_vmax,
     )
 
     manifest = {
@@ -169,6 +175,28 @@ def _export_native_mea_plot(path: Path, output_path: Path, *, title: str) -> Non
     spectrum = ims.Spectrum.read_mea(str(path))
     fig, ax = spectrum.plot()
     ax.set_title(title)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    _close_figure(fig)
+
+
+def _export_array_heatmap(
+    values: np.ndarray,
+    output_path: Path,
+    *,
+    title: str,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    values = np.asarray(values, dtype=np.float32)
+    fig, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+    image = ax.imshow(values, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)
+    ax.set_title(title)
+    ax.set_xlabel("Drift time")
+    ax.set_ylabel("Retention time")
+    fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     _close_figure(fig)
 
